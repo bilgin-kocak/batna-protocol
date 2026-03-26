@@ -68,6 +68,31 @@ FHE is the only cryptographic primitive where:
 
 This is not privacy bolted onto an existing product. This is a product that **cannot exist** without FHE.
 
+### Encrypted State Flow
+
+```mermaid
+flowchart LR
+    A["Party A\n(encrypt floor)"] -->|euint64| C["NegotiationRoom.sol"]
+    B["Party B\n(encrypt ceiling)"] -->|euint64| C
+    C -->|"FHE.lte()"| D{"ZOPA\nexists?"}
+    D -->|Yes| E["FHE.add() + FHE.div()\n= encrypted midpoint"]
+    D -->|No| F["FHE.select() → 0"]
+    E --> G["FHE.allowPublic()"]
+    F --> G
+    G -->|"Threshold\nDecryption"| H["Result revealed\n(midpoint or 'No Deal')"]
+
+    style A fill:#1a1a22,stroke:#c9a227,color:#e8e6e3
+    style B fill:#1a1a22,stroke:#c9a227,color:#e8e6e3
+    style C fill:#1a1a22,stroke:#c9a227,color:#c9a227
+    style D fill:#1a1a22,stroke:#c9a227,color:#e8e6e3
+    style E fill:#1a1a22,stroke:#2ecc71,color:#2ecc71
+    style F fill:#1a1a22,stroke:#e74c3c,color:#e74c3c
+    style G fill:#1a1a22,stroke:#c9a227,color:#e8e6e3
+    style H fill:#1a1a22,stroke:#c9a227,color:#c9a227
+```
+
+> **Every box above operates on ciphertexts.** Plaintext only appears at the final output — and only the result, never the inputs.
+
 ## The Vision: AI Agents + FHE
 
 Every negotiation — salary, M&A, real estate, even geopolitical ceasefires — reduces to the same math: *do two hidden ranges overlap?*
