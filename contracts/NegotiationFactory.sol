@@ -20,15 +20,18 @@ contract NegotiationFactory {
     /// @notice Create a new negotiation room. Caller becomes partyA.
     /// @param partyB The counterparty address
     /// @param context Human-readable description of the negotiation
+    /// @param weightA Settlement weight for party A (0-100, 50 = equal midpoint)
     /// @return The deployed room address
     function createRoom(
         address partyB,
-        string calldata context
+        string calldata context,
+        uint8 weightA
     ) external returns (address) {
         NegotiationRoom room = new NegotiationRoom(
             msg.sender,
             partyB,
-            context
+            context,
+            weightA
         );
 
         address roomAddr = address(room);
