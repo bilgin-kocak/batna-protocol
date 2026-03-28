@@ -4,6 +4,8 @@ cache/
 typechain-types/
 coverage/
 .env
+.env.local
 dist/
+.next/
 
 .claude/
