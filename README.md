@@ -1,6 +1,6 @@
 <p align="center">
   <strong>BATNA PROTOCOL</strong><br/>
-  <em>Zero-Knowledge Negotiation Engine on Fhenix CoFHE</em>
+  <em>Encrypted Negotiation Engine on Fhenix CoFHE</em>
 </p>
 
 <p align="center">
@@ -13,6 +13,10 @@
 </p>
 
 ---
+
+<p align="center">
+  <img src="images/batna-home-page.png" alt="BATNA Protocol — Encrypted Negotiation UI" width="800"/>
+</p>
 
 > **The first negotiation where revealing your minimum first is no longer a disadvantage.**
 
@@ -93,6 +97,21 @@ flowchart LR
 
 > **Every box above operates on ciphertexts.** Plaintext only appears at the final output — and only the result, never the inputs.
 
+### Privacy Boundary — What Leaks, What Doesn't
+
+| Data | Visibility | Notes |
+|------|-----------|-------|
+| Party reservation prices | **Hidden** | Encrypted client-side via CoFHE SDK; never decrypted individually on-chain |
+| ZOPA existence (before publish) | **Hidden** | Encrypted `ebool`; revealed only via threshold decryption after both submit |
+| Final settlement result | **Revealed** | Only after both parties submit + threshold network decrypts |
+| Room metadata / context | **Public** | Stored as plaintext string on-chain |
+| Participant addresses | **Public** | On-chain, visible in contract state |
+| Submission timing | **Public** | Transaction timestamps visible on-chain |
+| Number of rooms / negotiations | **Public** | Factory tracks all rooms publicly |
+| Settlement weight | **Public** | Set at room creation, visible in contract state |
+
+> **Design principle:** Individual reservation prices *never* become decryptable — only the computed result does. Even the contract itself cannot read Party A's floor or Party B's ceiling.
+
 ## The Vision: AI Agents + FHE
 
 Every negotiation — salary, M&A, real estate, even geopolitical ceasefires — reduces to the same math: *do two hidden ranges overlap?*
@@ -118,12 +137,13 @@ batna/
 │   ├── NegotiationRoom.sol       ← Core: FHE ZOPA detection + midpoint
 │   └── NegotiationFactory.sol    ← Factory: permissionless room deployment
 ├── test/
-│   ├── NegotiationRoom.test.ts   ← 9 tests (access, ZOPA, midpoint, events)
+│   ├── NegotiationRoom.test.ts   ← 14 tests (access, ZOPA, weighted midpoint, publishResults)
 │   └── NegotiationFactory.test.ts← 5 tests (creation, tracking, lookup)
 ├── frontend/
 │   └── src/
 │       ├── components/
-│       │   ├── NegotiationUI.tsx  ← Submit → Sealed → Deal/NoDeal states
+│       │   ├── NegotiationUI.tsx  ← CoFHE SDK encryption → Sealed → Deal/NoDeal
+│       │   ├── CofheWrapper.tsx   ← CoFHE SDK provider (dynamic import for SSR)
 │       │   ├── RoomCreator.tsx    ← Create new negotiation rooms
 │       │   └── Header.tsx         ← Wallet connection
 │       └── config/
@@ -137,14 +157,22 @@ batna/
 ### Core Contract: NegotiationRoom.sol
 
 ```solidity
+// Client submits encrypted input — plaintext never touches calldata
+function submitReservation(InEuint64 calldata encryptedAmount) external {
+    encMinA = FHE.asEuint64(encryptedAmount);
+}
+
 // ZOPA detection — entirely on ciphertexts
 ebool zopaExists = FHE.lte(encMinA, encMaxB);
 
-// Midpoint — encrypted arithmetic
-euint64 encMidpoint = FHE.div(FHE.add(encMinA, encMaxB), FHE.asEuint64(2));
+// Weighted settlement — (minA * weightA + maxB * weightB) / 100
+euint64 settlement = FHE.div(
+    FHE.add(FHE.mul(encMinA, encWeightA), FHE.mul(encMaxB, encWeightB)),
+    FHE.asEuint64(100)
+);
 
 // Conditional result — no branching, no information leak
-encResult = FHE.select(zopaExists, encMidpoint, FHE.asEuint64(0));
+encResult = FHE.select(zopaExists, settlement, FHE.asEuint64(0));
 
 // Only results become decryptable — individual prices never do
 FHE.allowPublic(encResult);
@@ -154,12 +182,15 @@ FHE.allowPublic(encResult);
 
 | Operation | Purpose | Why It Matters |
 |---|---|---|
+| `InEuint64` | Client-encrypted input type | Plaintext never touches calldata or contract state |
 | `FHE.lte()` | Compare two encrypted values | ZOPA check without decrypting either |
-| `FHE.add()` | Sum encrypted values | Midpoint numerator on ciphertexts |
-| `FHE.div()` | Divide encrypted values | Midpoint calculation |
+| `FHE.mul()` | Multiply encrypted values | Weighted settlement on ciphertexts |
+| `FHE.add()` | Sum encrypted values | Weighted sum on ciphertexts |
+| `FHE.div()` | Divide encrypted values | Settlement calculation |
 | `FHE.select()` | Encrypted ternary | No `if/else` branching = no information leak |
 | `FHE.allowThis()` | Contract self-access | Called after EVERY mutation — #1 FHE pitfall |
 | `FHE.allowPublic()` | Enable threshold decryption | Only on final results, never on inputs |
+| `FHE.publishDecryptResult()` | Verify + publish decrypted result | Threshold signature verification on-chain |
 
 ## Quick Start
 
@@ -177,12 +208,19 @@ cd batna-protocol
 # Install dependencies
 pnpm install
 
-# Run all 14 tests
+# Run all 19 tests
 pnpm test
 
 # Compile contracts
 pnpm compile
 ```
+
+### Deployed Contracts (Arbitrum Sepolia)
+
+| Contract | Address |
+|----------|---------|
+| **NegotiationFactory** | [`0x118a287a3e34bf168cC1E098362BF431A050cDf2`](https://sepolia.arbiscan.io/address/0x118a287a3e34bf168cC1E098362BF431A050cDf2) |
+| Deployer | `0x48D185bc646534597E25199dd4d73692ebD98BAc` |
 
 ### Deploy to Arbitrum Sepolia
 
@@ -196,9 +234,10 @@ npx hardhat deploy-factory --network arb-sepolia
 
 # Create a negotiation room
 npx hardhat create-room \
-  --factory <FACTORY_ADDRESS> \
+  --factory 0x118a287a3e34bf168cC1E098362BF431A050cDf2 \
   --partyb <COUNTERPARTY_ADDRESS> \
   --context "Salary negotiation: Senior Engineer" \
+  --weight 50 \
   --network arb-sepolia
 ```
 
@@ -213,7 +252,7 @@ npm run dev
 
 ## Tests
 
-**14 tests, strict TDD** — every test written before its implementation.
+**19 tests, strict TDD** — every test written before its implementation. Tests use real CoFHE SDK encrypted inputs via `Encryptable.uint64()`.
 
 ```
   NegotiationFactory
@@ -233,17 +272,23 @@ npm run dev
     ✔ returns zero when no ZOPA (minA > maxB)
     ✔ emits PartySubmitted event on each submission
     ✔ rejects submission after resolution
+    ✔ computes weighted settlement when weightA != 50
+    ✔ equal weight (50) produces standard midpoint
+    ✔ cannot call publishResults before resolution
+    ✔ getEncryptedResult reverts before resolution
+    ✔ getEncryptedZopa reverts before resolution
 
-  14 passing
+  19 passing
 ```
 
 ## Tech Stack
 
 | Layer | Technology |
 |---|---|
-| FHE | Fhenix CoFHE — `@fhenixprotocol/cofhe-contracts` |
+| FHE Contracts | Fhenix CoFHE — `@fhenixprotocol/cofhe-contracts` (InEuint64, FHE.sol) |
+| FHE Client SDK | `@cofhe/sdk` + `@cofhe/react` — client-side encryption + React hooks |
 | Contracts | Solidity 0.8.25 |
-| Testing | Hardhat + `@cofhe/hardhat-plugin` + Mocha/Chai |
+| Testing | Hardhat + `@cofhe/hardhat-plugin` + Mocha/Chai (19 tests) |
 | Frontend | Next.js 14 + Tailwind CSS |
 | Web3 | wagmi v2 + viem + RainbowKit |
 | Chain | Arbitrum Sepolia |
@@ -253,7 +298,7 @@ npm run dev
 
 | Wave | Dates | Deliverable |
 |---|---|---|
-| **1** | Mar 21–31 | Core FHE ZOPA mechanism + 14 tests + frontend + deploy scripts |
+| **1** | Mar 21–31 | Encrypted ZOPA + weighted settlement + 19 tests + CoFHE SDK frontend + deploy scripts |
 | **2** | Mar 30–Apr 8 | AI Agent Layer — Claude agents convert any context into encrypted arithmetic |
 | **3** | Apr 8–May 8 | Multi-party ZOPA + encrypted reputation + market oracle |
 | **4** | May 11–23 | Privara SDK settlement + developer SDK |
