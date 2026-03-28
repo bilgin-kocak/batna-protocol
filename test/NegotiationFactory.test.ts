@@ -16,7 +16,7 @@ describe("NegotiationFactory", function () {
   it("creates a room and tracks it", async function () {
     const { factory, alice, bob } = await loadFixture(deployFactoryFixture);
 
-    await factory.connect(alice).createRoom(bob.address, "Salary negotiation");
+    await factory.connect(alice).createRoom(bob.address, "Salary negotiation", 50);
 
     const rooms = await factory.getRooms();
     expect(rooms.length).to.equal(1);
@@ -25,7 +25,7 @@ describe("NegotiationFactory", function () {
   it("emits RoomCreated event with correct args", async function () {
     const { factory, alice, bob } = await loadFixture(deployFactoryFixture);
 
-    const tx = factory.connect(alice).createRoom(bob.address, "M&A deal");
+    const tx = factory.connect(alice).createRoom(bob.address, "M&A deal", 50);
 
     await expect(tx)
       .to.emit(factory, "RoomCreated")
@@ -42,14 +42,13 @@ describe("NegotiationFactory", function () {
 
     const tx = await factory
       .connect(alice)
-      .createRoom(bob.address, "VC term sheet");
+      .createRoom(bob.address, "VC term sheet", 50);
     const receipt = await tx.wait();
 
     const rooms = await factory.getRooms();
     const roomAddress = rooms[0];
 
-    const Room = await hre.ethers.getContractFactory("NegotiationRoom");
-    const room = Room.attach(roomAddress);
+    const room = await hre.ethers.getContractAt("NegotiationRoom", roomAddress);
 
     expect(await room.partyA()).to.equal(alice.address);
     expect(await room.partyB()).to.equal(bob.address);
@@ -61,9 +60,9 @@ describe("NegotiationFactory", function () {
       deployFactoryFixture
     );
 
-    await factory.connect(alice).createRoom(bob.address, "Deal 1");
-    await factory.connect(bob).createRoom(charlie.address, "Deal 2");
-    await factory.connect(charlie).createRoom(alice.address, "Deal 3");
+    await factory.connect(alice).createRoom(bob.address, "Deal 1", 50);
+    await factory.connect(bob).createRoom(charlie.address, "Deal 2", 50);
+    await factory.connect(charlie).createRoom(alice.address, "Deal 3", 50);
 
     const rooms = await factory.getRooms();
     expect(rooms.length).to.equal(3);
@@ -76,9 +75,9 @@ describe("NegotiationFactory", function () {
       deployFactoryFixture
     );
 
-    await factory.connect(alice).createRoom(bob.address, "Deal 1");
-    await factory.connect(alice).createRoom(charlie.address, "Deal 2");
-    await factory.connect(bob).createRoom(charlie.address, "Deal 3");
+    await factory.connect(alice).createRoom(bob.address, "Deal 1", 50);
+    await factory.connect(alice).createRoom(charlie.address, "Deal 2", 50);
+    await factory.connect(bob).createRoom(charlie.address, "Deal 3", 50);
 
     const aliceRooms = await factory.getRoomsByParty(alice.address);
     expect(aliceRooms.length).to.equal(2);
