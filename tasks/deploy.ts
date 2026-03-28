@@ -20,13 +20,13 @@ task("create-room", "Create a negotiation room via the factory")
   .addParam("factory", "Factory contract address")
   .addParam("partyb", "Counterparty address")
   .addParam("context", "Negotiation context description")
-  .setAction(async ({ factory: factoryAddr, partyb, context }, hre) => {
+  .addOptionalParam("weight", "Settlement weight for party A (0-100, default 50)", "50")
+  .setAction(async ({ factory: factoryAddr, partyb, context, weight }, hre) => {
     const [signer] = await hre.ethers.getSigners();
 
-    const Factory = await hre.ethers.getContractFactory("NegotiationFactory");
-    const factory = Factory.attach(factoryAddr);
+    const factory = await hre.ethers.getContractAt("NegotiationFactory", factoryAddr, signer);
 
-    const tx = await factory.connect(signer).createRoom(partyb, context);
+    const tx = await factory.createRoom(partyb, context, parseInt(weight));
     const receipt = await tx.wait();
 
     console.log("Room created in tx:", receipt?.hash);
