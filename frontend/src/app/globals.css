@@ -141,3 +141,9 @@ body::after {
 .animate-seal-pulse {
   animation: sealPulse 2.5s ease-in-out infinite;
 }
+
+/* Hide CoFHE SDK floating debug widget */
+.fnx-floating-button,
+[class*="fnx-floating"] {
+  display: none !important;
+}
