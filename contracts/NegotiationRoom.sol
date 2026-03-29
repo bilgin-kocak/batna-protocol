@@ -12,6 +12,7 @@ contract NegotiationRoom {
 
     address public partyA;
     address public partyB;
+    address public auditor; // optional: can decrypt result but never individual inputs
     string public context;
     uint8 public weightA; // 0-100: weight for partyA's value in settlement (50 = equal midpoint)
 
@@ -39,12 +40,13 @@ contract NegotiationRoom {
 
     // ── Constructor ────────────────────────────────────────────────
 
-    constructor(address _partyA, address _partyB, string memory _context, uint8 _weightA) {
+    constructor(address _partyA, address _partyB, string memory _context, uint8 _weightA, address _auditor) {
         require(_weightA <= 100, "Weight must be 0-100");
         partyA = _partyA;
         partyB = _partyB;
         context = _context;
         weightA = _weightA;
+        auditor = _auditor; // address(0) = no auditor
     }
 
     // ── Modifiers ──────────────────────────────────────────────────
@@ -127,6 +129,13 @@ contract NegotiationRoom {
         // Allow threshold network to decrypt only the results
         FHE.allowPublic(encZopaExists);
         FHE.allowPublic(encResult);
+
+        // Confidential auditability: auditor can decrypt result, never inputs
+        if (auditor != address(0)) {
+            FHE.allow(encZopaExists, auditor);
+            FHE.allow(encResult, auditor);
+            // Note: encMinA and encMaxB are NEVER allowed for auditor
+        }
 
         resolved = true;
     }

@@ -21,17 +21,20 @@ contract NegotiationFactory {
     /// @param partyB The counterparty address
     /// @param context Human-readable description of the negotiation
     /// @param weightA Settlement weight for party A (0-100, 50 = equal midpoint)
+    /// @param auditor Optional auditor address that can decrypt result only (address(0) = none)
     /// @return The deployed room address
     function createRoom(
         address partyB,
         string calldata context,
-        uint8 weightA
+        uint8 weightA,
+        address auditor
     ) external returns (address) {
         NegotiationRoom room = new NegotiationRoom(
             msg.sender,
             partyB,
             context,
-            weightA
+            weightA,
+            auditor
         );
 
         address roomAddr = address(room);

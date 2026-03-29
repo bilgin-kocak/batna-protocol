@@ -14,7 +14,8 @@ describe("NegotiationRoom", function () {
       alice.address,
       bob.address,
       "Salary negotiation: Senior Engineer",
-      50 // equal weight (standard midpoint)
+      50, // equal weight (standard midpoint)
+      "0x0000000000000000000000000000000000000000" // no auditor
     );
 
     return { room, owner, alice, bob, stranger, client };
@@ -183,7 +184,7 @@ describe("NegotiationRoom", function () {
 
     const Room = await hre.ethers.getContractFactory("NegotiationRoom");
     // weightA=60 means: settlement = (minA*60 + maxB*40) / 100
-    const room = await Room.deploy(alice.address, bob.address, "Weighted deal", 60);
+    const room = await Room.deploy(alice.address, bob.address, "Weighted deal", 60, "0x0000000000000000000000000000000000000000");
 
     // Alice floor: 100000, Bob ceiling: 200000
     // Settlement = (100000*60 + 200000*40) / 100 = (6000000 + 8000000) / 100 = 140000
