@@ -1,6 +1,6 @@
 export const FACTORY_ADDRESS =
   (process.env.NEXT_PUBLIC_FACTORY_ADDRESS as `0x${string}`) ||
-  "0x118a287a3e34bf168cC1E098362BF431A050cDf2";
+  "0x1221aBCe7D8FB1ba4cF9293E94539cb45e7857fE";
 
 export const NEGOTIATION_ROOM_ABI = [
   {
@@ -171,6 +171,7 @@ export const NEGOTIATION_FACTORY_ABI = [
       { internalType: "address", name: "partyB", type: "address" },
       { internalType: "string", name: "context", type: "string" },
       { internalType: "uint8", name: "weightA", type: "uint8" },
+      { internalType: "address", name: "auditor", type: "address" },
     ],
     name: "createRoom",
     outputs: [{ internalType: "address", name: "", type: "address" }],

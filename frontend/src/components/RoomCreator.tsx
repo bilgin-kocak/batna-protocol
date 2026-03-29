@@ -25,7 +25,7 @@ export function RoomCreator({ onRoomCreated }: RoomCreatorProps) {
       address: FACTORY_ADDRESS,
       abi: NEGOTIATION_FACTORY_ABI,
       functionName: "createRoom",
-      args: [partyB as `0x${string}`, context, weight],
+      args: [partyB as `0x${string}`, context, weight, "0x0000000000000000000000000000000000000000"],
     });
   };
 

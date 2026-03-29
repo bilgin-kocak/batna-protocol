@@ -21,12 +21,13 @@ task("create-room", "Create a negotiation room via the factory")
   .addParam("partyb", "Counterparty address")
   .addParam("context", "Negotiation context description")
   .addOptionalParam("weight", "Settlement weight for party A (0-100, default 50)", "50")
-  .setAction(async ({ factory: factoryAddr, partyb, context, weight }, hre) => {
+  .addOptionalParam("auditor", "Auditor address that can decrypt result only (default: none)", "0x0000000000000000000000000000000000000000")
+  .setAction(async ({ factory: factoryAddr, partyb, context, weight, auditor }, hre) => {
     const [signer] = await hre.ethers.getSigners();
 
     const factory = await hre.ethers.getContractAt("NegotiationFactory", factoryAddr, signer);
 
-    const tx = await factory.createRoom(partyb, context, parseInt(weight));
+    const tx = await factory.createRoom(partyb, context, parseInt(weight), auditor);
     const receipt = await tx.wait();
 
     console.log("Room created in tx:", receipt?.hash);
