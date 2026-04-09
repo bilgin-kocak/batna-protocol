@@ -2,12 +2,28 @@ export const FACTORY_ADDRESS =
   (process.env.NEXT_PUBLIC_FACTORY_ADDRESS as `0x${string}`) ||
   "0x1221aBCe7D8FB1ba4cF9293E94539cb45e7857fE";
 
+/**
+ * NegotiationType enum mirrors `enum NegotiationType { GENERIC, SALARY, OTC, MA }`
+ * in NegotiationRoom.sol. Used by frontend selects + API route validation.
+ */
+export const NEGOTIATION_TYPE = {
+  GENERIC: 0,
+  SALARY: 1,
+  OTC: 2,
+  MA: 3,
+} as const;
+export type NegotiationTypeValue = (typeof NEGOTIATION_TYPE)[keyof typeof NEGOTIATION_TYPE];
+
 export const NEGOTIATION_ROOM_ABI = [
   {
     inputs: [
       { internalType: "address", name: "_partyA", type: "address" },
       { internalType: "address", name: "_partyB", type: "address" },
       { internalType: "string", name: "_context", type: "string" },
+      { internalType: "uint8", name: "_weightA", type: "uint8" },
+      { internalType: "address", name: "_auditor", type: "address" },
+      { internalType: "uint256", name: "_deadline", type: "uint256" },
+      { internalType: "uint8", name: "_negotiationType", type: "uint8" },
     ],
     stateMutability: "nonpayable",
     type: "constructor",
@@ -15,12 +31,7 @@ export const NEGOTIATION_ROOM_ABI = [
   {
     anonymous: false,
     inputs: [
-      {
-        indexed: false,
-        internalType: "uint256",
-        name: "splitPoint",
-        type: "uint256",
-      },
+      { indexed: false, internalType: "uint256", name: "splitPoint", type: "uint256" },
     ],
     name: "DealFound",
     type: "event",
@@ -32,6 +43,15 @@ export const NEGOTIATION_ROOM_ABI = [
       { indexed: true, internalType: "address", name: "party", type: "address" },
     ],
     name: "PartySubmitted",
+    type: "event",
+  },
+  {
+    anonymous: false,
+    inputs: [
+      { indexed: true, internalType: "address", name: "party", type: "address" },
+      { indexed: true, internalType: "address", name: "agent", type: "address" },
+    ],
+    name: "AgentSubmission",
     type: "event",
   },
   {
@@ -52,6 +72,34 @@ export const NEGOTIATION_ROOM_ABI = [
     inputs: [],
     name: "context",
     outputs: [{ internalType: "string", name: "", type: "string" }],
+    stateMutability: "view",
+    type: "function",
+  },
+  {
+    inputs: [],
+    name: "weightA",
+    outputs: [{ internalType: "uint8", name: "", type: "uint8" }],
+    stateMutability: "view",
+    type: "function",
+  },
+  {
+    inputs: [],
+    name: "auditor",
+    outputs: [{ internalType: "address", name: "", type: "address" }],
+    stateMutability: "view",
+    type: "function",
+  },
+  {
+    inputs: [],
+    name: "deadline",
+    outputs: [{ internalType: "uint256", name: "", type: "uint256" }],
+    stateMutability: "view",
+    type: "function",
+  },
+  {
+    inputs: [],
+    name: "negotiationType",
+    outputs: [{ internalType: "uint8", name: "", type: "uint8" }],
     stateMutability: "view",
     type: "function",
   },
@@ -110,6 +158,26 @@ export const NEGOTIATION_ROOM_ABI = [
     type: "function",
   },
   {
+    inputs: [
+      {
+        components: [
+          { internalType: "uint256", name: "ctHash", type: "uint256" },
+          { internalType: "uint8", name: "securityZone", type: "uint8" },
+          { internalType: "uint8", name: "utype", type: "uint8" },
+          { internalType: "bytes", name: "signature", type: "bytes" },
+        ],
+        internalType: "struct InEuint64",
+        name: "encryptedAmount",
+        type: "tuple",
+      },
+      { internalType: "address", name: "agent", type: "address" },
+    ],
+    name: "submitReservationAsAgent",
+    outputs: [],
+    stateMutability: "nonpayable",
+    type: "function",
+  },
+  {
     inputs: [],
     name: "getEncryptedResult",
     outputs: [{ internalType: "euint64", name: "", type: "uint256" }],
@@ -143,24 +211,9 @@ export const NEGOTIATION_FACTORY_ABI = [
   {
     anonymous: false,
     inputs: [
-      {
-        indexed: true,
-        internalType: "address",
-        name: "room",
-        type: "address",
-      },
-      {
-        indexed: true,
-        internalType: "address",
-        name: "partyA",
-        type: "address",
-      },
-      {
-        indexed: true,
-        internalType: "address",
-        name: "partyB",
-        type: "address",
-      },
+      { indexed: true, internalType: "address", name: "room", type: "address" },
+      { indexed: true, internalType: "address", name: "partyA", type: "address" },
+      { indexed: true, internalType: "address", name: "partyB", type: "address" },
       { indexed: false, internalType: "string", name: "context", type: "string" },
     ],
     name: "RoomCreated",
@@ -172,6 +225,12 @@ export const NEGOTIATION_FACTORY_ABI = [
       { internalType: "string", name: "context", type: "string" },
       { internalType: "uint8", name: "weightA", type: "uint8" },
       { internalType: "address", name: "auditor", type: "address" },
+      { internalType: "uint256", name: "deadline", type: "uint256" },
+      {
+        internalType: "enum NegotiationRoom.NegotiationType",
+        name: "negotiationType",
+        type: "uint8",
+      },
     ],
     name: "createRoom",
     outputs: [{ internalType: "address", name: "", type: "address" }],

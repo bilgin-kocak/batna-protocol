@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useAccount, useReadContract } from "wagmi";
 import { RoomCreator } from "@/components/RoomCreator";
 import dynamic from "next/dynamic";
+import { TwoAgentBattle } from "@/components/TwoAgentBattle";
 
 const NegotiationUI = dynamic(
   () => import("@/components/NegotiationUI").then((mod) => mod.NegotiationUI),
@@ -86,6 +87,11 @@ export default function Home() {
             </p>
           </div>
         ))}
+      </div>
+
+      {/* Two-Agent Battle (headline demo) */}
+      <div style={{ animationDelay: "0.15s" }} className="animate-fade-up">
+        <TwoAgentBattle />
       </div>
 
       {/* Create Room */}

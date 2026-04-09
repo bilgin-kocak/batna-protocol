@@ -10,6 +10,8 @@ import {
 import { useCofheClient, useCofheConnection } from "@cofhe/react";
 import { Encryptable, EncryptStep } from "@cofhe/sdk";
 import { NEGOTIATION_ROOM_ABI } from "@/config/contracts";
+import { ModeToggle, type NegotiationMode } from "./ModeToggle";
+import { SoloAgentMode } from "./SoloAgentMode";
 
 interface NegotiationUIProps {
   roomAddress: `0x${string}`;
@@ -19,6 +21,7 @@ export function NegotiationUI({ roomAddress }: NegotiationUIProps) {
   const { address } = useAccount();
   const [amount, setAmount] = useState("");
   const [encryptionStep, setEncryptionStep] = useState<string | null>(null);
+  const [mode, setMode] = useState<NegotiationMode>("manual");
 
   const { writeContract, data: hash, isPending } = useWriteContract();
   const { isLoading: isConfirming } = useWaitForTransactionReceipt({ hash });
@@ -82,6 +85,13 @@ export function NegotiationUI({ roomAddress }: NegotiationUIProps) {
     functionName: "revealedSplit",
     query: { refetchInterval: 4000, enabled: !!resolved },
   });
+
+  const { data: negotiationTypeRaw } = useReadContract({
+    address: roomAddress,
+    abi: NEGOTIATION_ROOM_ABI,
+    functionName: "negotiationType",
+  });
+  const negotiationType = Number(negotiationTypeRaw ?? 0);
 
   // ── Derived state ─────────────────────────────────────
 
@@ -223,8 +233,18 @@ export function NegotiationUI({ roomAddress }: NegotiationUIProps) {
       <RoomHeader context={context} roomAddress={roomAddress} myRole={myRole} />
       <StatusBar aSubmitted={!!aSubmitted} bSubmitted={!!bSubmitted} resolved={!!resolved} />
 
-      {isParty ? (
-        <div className="card-surface p-6 mt-4">
+      {isParty && <ModeToggle value={mode} onChange={setMode} />}
+
+      {isParty && mode === "solo-agent" ? (
+        <SoloAgentMode
+          roomAddress={roomAddress}
+          isPartyA={isPartyA}
+          isPartyB={isPartyB}
+          negotiationType={negotiationType}
+          agentAddress={address}
+        />
+      ) : isParty ? (
+        <div className="card-surface p-6">
           <label className="label-tag block mb-2">
             {isPartyA
               ? "Your minimum acceptable value"
