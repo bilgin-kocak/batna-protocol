@@ -8,6 +8,17 @@ import {FHE, euint64, ebool, InEuint64} from "@fhenixprotocol/cofhe-contracts/FH
 ///         FHE determines whether a Zone of Possible Agreement exists and
 ///         computes the midpoint — without revealing either party's actual number.
 contract NegotiationRoom {
+    // ── Types ──────────────────────────────────────────────────────
+
+    /// @notice Categorizes the deal so frontends can route to type-specific UX.
+    ///         Stored as plaintext metadata — not part of the FHE computation.
+    enum NegotiationType {
+        GENERIC,
+        SALARY,
+        OTC,
+        MA
+    }
+
     // ── State ──────────────────────────────────────────────────────
 
     address public partyA;
@@ -15,6 +26,8 @@ contract NegotiationRoom {
     address public auditor; // optional: can decrypt result but never individual inputs
     string public context;
     uint8 public weightA; // 0-100: weight for partyA's value in settlement (50 = equal midpoint)
+    uint256 public deadline; // unix timestamp; 0 = no deadline
+    NegotiationType public negotiationType;
 
     bool public aSubmitted;
     bool public bSubmitted;
@@ -35,18 +48,32 @@ contract NegotiationRoom {
     // ── Events ─────────────────────────────────────────────────────
 
     event PartySubmitted(address indexed party);
+    /// @notice Emitted when an AI agent (rather than the party themselves) submits.
+    ///         The party (partyA/partyB) signs the tx; `agent` records which agent
+    ///         derived the price. Lets on-chain history distinguish agent vs human.
+    event AgentSubmission(address indexed party, address indexed agent);
     event DealFound(uint256 splitPoint);
     event NoDeal();
 
     // ── Constructor ────────────────────────────────────────────────
 
-    constructor(address _partyA, address _partyB, string memory _context, uint8 _weightA, address _auditor) {
+    constructor(
+        address _partyA,
+        address _partyB,
+        string memory _context,
+        uint8 _weightA,
+        address _auditor,
+        uint256 _deadline,
+        NegotiationType _negotiationType
+    ) {
         require(_weightA <= 100, "Weight must be 0-100");
         partyA = _partyA;
         partyB = _partyB;
         context = _context;
         weightA = _weightA;
         auditor = _auditor; // address(0) = no auditor
+        deadline = _deadline; // 0 = no deadline
+        negotiationType = _negotiationType;
     }
 
     // ── Modifiers ──────────────────────────────────────────────────
@@ -61,11 +88,34 @@ contract NegotiationRoom {
         _;
     }
 
+    modifier notExpired() {
+        require(deadline == 0 || block.timestamp <= deadline, "Negotiation expired");
+        _;
+    }
+
     // ── Submit Reservation Price ───────────────────────────────────
     /// @notice Submit your reservation price encrypted client-side via CoFHE SDK.
     ///         The plaintext never touches the contract or calldata.
     /// @param encryptedAmount The encrypted reservation price (InEuint64 from client)
-    function submitReservation(InEuint64 calldata encryptedAmount) external onlyParty notResolved {
+    function submitReservation(InEuint64 calldata encryptedAmount) external onlyParty notResolved notExpired {
+        _submit(encryptedAmount);
+    }
+
+    /// @notice Submit a reservation price derived by an AI agent. The party still
+    ///         signs the tx (msg.sender == partyA/partyB), so custody never leaves
+    ///         the party. `agent` is recorded for on-chain provenance.
+    /// @param encryptedAmount The encrypted reservation price (InEuint64 from client)
+    /// @param agent The address that derived the price (e.g., agent service wallet)
+    function submitReservationAsAgent(
+        InEuint64 calldata encryptedAmount,
+        address agent
+    ) external onlyParty notResolved notExpired {
+        _submit(encryptedAmount);
+        emit AgentSubmission(msg.sender, agent);
+    }
+
+    /// @dev Shared submission logic. calldata params can flow into internal funcs.
+    function _submit(InEuint64 calldata encryptedAmount) internal {
         if (msg.sender == partyA) {
             require(!aSubmitted, "A already submitted");
             encMinA = FHE.asEuint64(encryptedAmount);

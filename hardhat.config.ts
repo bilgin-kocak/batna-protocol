@@ -3,6 +3,7 @@ import "@nomicfoundation/hardhat-toolbox";
 import "@cofhe/hardhat-plugin";
 import * as dotenv from "dotenv";
 import "./tasks/deploy";
+import "./tasks/agent";
 
 dotenv.config();
 

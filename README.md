@@ -6,6 +6,7 @@
 <p align="center">
   <a href="#how-it-works">How It Works</a> &nbsp;|&nbsp;
   <a href="#why-fhe">Why FHE</a> &nbsp;|&nbsp;
+  <a href="#wave-2--intent-based-ai-agents">AI Agents</a> &nbsp;|&nbsp;
   <a href="#architecture">Architecture</a> &nbsp;|&nbsp;
   <a href="#quick-start">Quick Start</a> &nbsp;|&nbsp;
   <a href="#tests">Tests</a> &nbsp;|&nbsp;
@@ -136,17 +137,70 @@ FHE.allow(encResult, auditor);
 
 This enables institutional compliance — proving a negotiation was fair without revealing positions to the public.
 
-## The Vision: AI Agents + FHE
+## Wave 2 — Intent-Based AI Agents
 
-Every negotiation — salary, M&A, real estate, even geopolitical ceasefires — reduces to the same math: _do two hidden ranges overlap?_
+**Humans submit intent. The protocol computes the deal.**
 
-With AI agents, **any negotiation described in words becomes encrypted arithmetic:**
+Wave 2 ships an agentic layer that reads free-form context (job description, deal memo, trading desk brief), derives a reservation price via Claude `claude-opus-4-6`, encrypts it client-side via the CoFHE SDK, and submits it to `NegotiationRoom.submitReservationAsAgent(...)` — which emits an on-chain `AgentSubmission` event so the agent's provenance is verifiable forever.
+
+### Two modes
+
+| Mode | Who derives | Who encrypts | Who submits |
+|---|---|---|---|
+| **Manual** (Wave 1) | Human | Human (browser WASM) | Human wallet |
+| **Solo Agent** (Wave 2) | Claude (via `/api/agent/derive`) | Human (browser WASM) | Human wallet |
+| **Two-Agent Battle** (Wave 2) | Claude × 2 (server-side) | Server (Node CoFHE SDK) | Two ephemeral demo wallets |
+
+### Two-Agent Battle flow
+
+```
+Browser             Next.js API              Arbitrum Sepolia
+   |                    |                          |
+   |  Start Battle      |                          |
+   | ─────────────────▶ |                          |
+   |                    | derive A + B (Claude)    |
+   |                    | factory.createRoom()     |
+   |                    | ──────────────────────▶  |
+   |                    | encryptSubmit(A) ──────▶ | PartySubmitted + AgentSubmission
+   |                    | encryptSubmit(B) ──────▶ | PartySubmitted + AgentSubmission
+   |                    |                          | _resolve() on ciphertexts
+   |  poll /status      |                          |
+   | ◀───────────────── |                          |
+   | deriving_a → submitted_a → resolved           |
+```
+
+The Anthropic API key never leaves the server. Each battle runs both sides autonomously — the browser only watches.
+
+### Templates shipped in Wave 2
+
+| Template | Role framing | Unit |
+|---|---|---|
+| `SALARY` | Candidate (floor) vs Employer (ceiling) | Integer USD |
+| `OTC` | Seller (floor) vs Buyer (ceiling) | Integer cents per unit (euint64-safe) |
+| `MA` | Seller board (floor) vs Acquirer (ceiling) | Integer USD millions |
+
+Templates are a registry — adding new use cases is a one-file drop.
+
+### Contract iteration
+
+Wave 2 extends `NegotiationRoom.sol` with:
+
+- `enum NegotiationType { GENERIC, SALARY, OTC, MA }` + `negotiationType` storage (on-chain routing signal)
+- `uint256 public deadline` + `notExpired` modifier (submissions revert past the deadline)
+- `submitReservationAsAgent(InEuint64, address agent)` — same logic as `submitReservation`, plus emits `AgentSubmission(party, agent)`
+- Factory `createRoom` passes deadline + type through to the room
+
+All Wave 1 tests stay green (deadline defaults to `0` = never expires, type defaults to `SALARY`).
+
+### Why this matters
+
+Every negotiation — salary, M&A, real estate, even geopolitical ceasefires — reduces to the same math: _do two hidden ranges overlap?_ With AI agents deriving the numbers, **any negotiation described in words becomes encrypted arithmetic:**
 
 | Scenario         | What the AI Agent Does                                                      |
 | ---------------- | --------------------------------------------------------------------------- |
 | **Salary**       | Reads job description + market data → encrypted floor/ceiling               |
 | **M&A**          | Analyzes financials → encrypted max offer / min accept                      |
-| **Real estate**  | Studies comps → encrypted bid / floor                                       |
+| **OTC**          | Computes fair spread → encrypted bid/ask on euint64 cents                   |
 | **Geopolitical** | Analyzes strategic position, sanctions, domestic pressure → encrypted terms |
 
 > Consider US-Iran tensions: neither side can state acceptable concessions without appearing weak. AI agents derive encrypted terms from each side's strategic position. If ranges overlap, a framework emerges. If not, neither side learns the gap.
@@ -158,23 +212,35 @@ With AI agents, **any negotiation described in words becomes encrypted arithmeti
 ```
 batna/
 ├── contracts/
-│   ├── NegotiationRoom.sol       ← Core: FHE ZOPA detection + midpoint
-│   └── NegotiationFactory.sol    ← Factory: permissionless room deployment
+│   ├── NegotiationRoom.sol       ← FHE ZOPA + weighted midpoint + deadline + NegotiationType
+│   └── NegotiationFactory.sol    ← Permissionless room deployment
+├── agent/                        ← Wave 2: Intent-based agent SDK
+│   ├── templates/                ← salary.ts / otc.ts / ma.ts (registry pattern)
+│   ├── derivePrice.ts            ← Claude wrapper, mock-injectable for tests
+│   ├── encryptSubmit.ts          ← CoFHE encrypt + ethers submit
+│   └── types.ts                  ← NegotiationType, AgentRole, Template
 ├── test/
-│   ├── NegotiationRoom.test.ts   ← 14 tests (access, ZOPA, weighted midpoint, publishResults)
-│   └── NegotiationFactory.test.ts← 5 tests (creation, tracking, lookup)
+│   ├── NegotiationRoom.test.ts   ← 21 tests (access, ZOPA, weighted, deadline, agent events)
+│   ├── NegotiationFactory.test.ts← 6 tests (creation, tracking, deadline+type passthrough)
+│   └── agent/                    ← 30 agent tests (templates, derivePrice, encryptSubmit)
+├── tasks/
+│   ├── deploy.ts                 ← deploy-factory + create-room (--deadline, --type)
+│   └── agent.ts                  ← Wave 2: agent-negotiate CLI task
 ├── frontend/
 │   └── src/
+│       ├── app/
+│       │   └── api/              ← Wave 2: /api/agent/derive + /api/demo/two-agents/*
 │       ├── components/
-│       │   ├── NegotiationUI.tsx  ← CoFHE SDK encryption → Sealed → Deal/NoDeal
-│       │   ├── CofheWrapper.tsx   ← CoFHE SDK provider (dynamic import for SSR)
-│       │   ├── RoomCreator.tsx    ← Create new negotiation rooms
+│       │   ├── NegotiationUI.tsx  ← Wrapped with ModeToggle (manual / solo-agent)
+│       │   ├── SoloAgentMode.tsx  ← Wave 2: paste context → Claude derives → user signs
+│       │   ├── TwoAgentBattle.tsx ← Wave 2: headline demo — two agents auto-negotiate
+│       │   ├── ModeToggle.tsx     ← Wave 2: manual / solo-agent switch
+│       │   ├── CofheWrapper.tsx   ← CoFHE SDK provider
+│       │   ├── RoomCreator.tsx    ← Now supports deadline + NegotiationType
 │       │   └── Header.tsx         ← Wallet connection
 │       └── config/
-│           ├── contracts.ts       ← ABIs + addresses
+│           ├── contracts.ts       ← ABIs + NEGOTIATION_TYPE enum
 │           └── wagmi.ts           ← Chain config
-├── ignition/modules/              ← Hardhat Ignition deployment
-├── tasks/deploy.ts                ← CLI tasks: deploy-factory, create-room
 └── hardhat.config.ts              ← Solidity 0.8.25, Arbitrum Sepolia
 ```
 
@@ -232,11 +298,38 @@ cd batna-protocol
 # Install dependencies
 pnpm install
 
-# Run all 19 tests
+# Run all 57 tests (contracts + agent module)
 pnpm test
 
 # Compile contracts
 pnpm compile
+```
+
+### Environment variables
+
+```bash
+# Hardhat / contract deployment
+PRIVATE_KEY=0x...
+ARBITRUM_SEPOLIA_RPC_URL=https://sepolia-rollup.arbitrum.io/rpc
+
+# Wave 2 agent module (Hardhat task + API routes)
+ANTHROPIC_API_KEY=sk-ant-...
+
+# Wave 2 two-agent battle demo (server-side, MUST stay server-only)
+DEMO_AGENT_A_PRIVATE_KEY=0x...    # pre-funded on Arbitrum Sepolia
+DEMO_AGENT_B_PRIVATE_KEY=0x...    # pre-funded on Arbitrum Sepolia
+```
+
+### Run the agent from the CLI
+
+```bash
+npx hardhat agent-negotiate \
+  --factory 0x1221aBCe7D8FB1ba4cF9293E94539cb45e7857fE \
+  --counterparty 0x... \
+  --role partyA \
+  --type salary \
+  --context "Senior backend engineer, 6 years, Bay Area, competing offer at 165K" \
+  --network arb-sepolia
 ```
 
 ### Deployed Contracts (Arbitrum Sepolia)
@@ -276,34 +369,26 @@ npm run dev
 
 ## Tests
 
-**19 tests, strict TDD** — every test written before its implementation. Tests use real CoFHE SDK encrypted inputs via `Encryptable.uint64()`.
+**57 tests, strict TDD** — every test written before its implementation. Contract tests use real CoFHE SDK encrypted inputs via `Encryptable.uint64()`; agent tests inject a mock Anthropic client for deterministic offline runs.
 
 ```
-  NegotiationFactory
-    ✔ creates a room and tracks it
-    ✔ emits RoomCreated event with correct args
-    ✔ created room has correct parties and context
-    ✔ can create multiple rooms
-    ✔ tracks rooms by party
+  NegotiationFactory              6 tests
+  NegotiationRoom                21 tests (includes Wave 2 deadline + enum + agent events)
+  agent/templates                18 tests (salary + otc + ma + registry + parseFirstInteger)
+  agent/derivePrice               5 tests (mocked Anthropic, retry logic, prompt shape)
+  agent/encryptSubmit             4 tests (e2e: derive -> encrypt -> submit -> resolve)
 
-  NegotiationRoom
-    ✔ rejects submission from non-party address
-    ✔ prevents double submission from party A
-    ✔ prevents double submission from party B
-    ✔ accepts encrypted submission from party A
-    ✔ auto-resolves when both parties submit
-    ✔ computes correct midpoint when ZOPA exists (minA <= maxB)
-    ✔ returns zero when no ZOPA (minA > maxB)
-    ✔ emits PartySubmitted event on each submission
-    ✔ rejects submission after resolution
-    ✔ computes weighted settlement when weightA != 50
-    ✔ equal weight (50) produces standard midpoint
-    ✔ cannot call publishResults before resolution
-    ✔ getEncryptedResult reverts before resolution
-    ✔ getEncryptedZopa reverts before resolution
-
-  19 passing
+  57 passing
 ```
+
+Key Wave 2 tests:
+
+- `constructor stores the deadline value` — deadline param is persisted
+- `submitReservation reverts after the deadline` — `notExpired` modifier works with `evm_setNextBlockTimestamp`
+- `submitReservationAsAgent emits PartySubmitted and AgentSubmission` — agent provenance is on-chain
+- `submitReservationAsAgent counts as the party for ZOPA resolution` — agent submissions flow through the same `_resolve()` path
+- `derivePrice retries once when first response is unparsable, then succeeds` — resilient to Claude occasional prose
+- `agent/encryptSubmit end-to-end` — both parties submit via the agent helper and the room resolves to the correct midpoint
 
 ## Tech Stack
 
@@ -320,13 +405,13 @@ npm run dev
 
 ## Roadmap
 
-| Wave  | Dates        | Deliverable                                                                           |
-| ----- | ------------ | ------------------------------------------------------------------------------------- |
-| **1** | Mar 21–31    | Encrypted ZOPA + weighted settlement + 19 tests + CoFHE SDK frontend + deploy scripts |
-| **2** | Mar 30–Apr 8 | AI Agent Layer — Claude agents convert any context into encrypted arithmetic          |
-| **3** | Apr 8–May 8  | Multi-party ZOPA + encrypted reputation + market oracle                               |
-| **4** | May 11–23    | Privara SDK settlement + developer SDK                                                |
-| **5** | May 23–Jun 5 | NY Tech Week live demo — AI agents negotiate on-screen                                |
+| Wave  | Dates        | Deliverable                                                                           | Status |
+| ----- | ------------ | ------------------------------------------------------------------------------------- | ------ |
+| **1** | Mar 21–31    | Encrypted ZOPA + weighted settlement + 19 tests + CoFHE SDK frontend + deploy scripts | ✅ Shipped |
+| **2** | Mar 30–Apr 8 | Claude agent layer (salary/OTC/M&A) + deadline + AgentSubmission event + two-agent battle demo | ✅ Shipped |
+| **3** | Apr 8–May 8  | Multi-party (N>2) ZOPA + encrypted reputation + market oracle                         | Next |
+| **4** | May 11–23    | Privara SDK settlement + `@batna-protocol/sdk` developer SDK                          | Planned |
+| **5** | May 23–Jun 5 | NY Tech Week live demo — AI agents negotiate on-screen                                | Planned |
 
 ## License
 

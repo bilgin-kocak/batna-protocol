@@ -22,19 +22,25 @@ contract NegotiationFactory {
     /// @param context Human-readable description of the negotiation
     /// @param weightA Settlement weight for party A (0-100, 50 = equal midpoint)
     /// @param auditor Optional auditor address that can decrypt result only (address(0) = none)
+    /// @param deadline Unix timestamp after which submissions revert (0 = no deadline)
+    /// @param negotiationType Category for frontend routing (GENERIC/SALARY/OTC/MA)
     /// @return The deployed room address
     function createRoom(
         address partyB,
         string calldata context,
         uint8 weightA,
-        address auditor
+        address auditor,
+        uint256 deadline,
+        NegotiationRoom.NegotiationType negotiationType
     ) external returns (address) {
         NegotiationRoom room = new NegotiationRoom(
             msg.sender,
             partyB,
             context,
             weightA,
-            auditor
+            auditor,
+            deadline,
+            negotiationType
         );
 
         address roomAddr = address(room);
