@@ -1,7 +1,7 @@
 {
   "name": "batna-protocol",
   "version": "0.1.0",
-  "description": "Zero-Knowledge Negotiation Engine on Fhenix CoFHE",
+  "description": "Encrypted Negotiation Engine on Fhenix CoFHE — humans submit intent, the protocol computes the deal on ciphertexts.",
   "scripts": {
     "compile": "hardhat compile",
     "test": "hardhat test",

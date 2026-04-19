@@ -2,6 +2,10 @@ import { expect } from "chai";
 import hre from "hardhat";
 import { loadFixture } from "@nomicfoundation/hardhat-network-helpers";
 
+// keccak256 of a UTF-8 string — matches frontend contextHash convention
+const H = (s: string): string =>
+  hre.ethers.keccak256(hre.ethers.toUtf8Bytes(s));
+
 describe("NegotiationFactory", function () {
   async function deployFactoryFixture() {
     const [owner, alice, bob, charlie] = await hre.ethers.getSigners();
@@ -21,34 +25,40 @@ describe("NegotiationFactory", function () {
   it("creates a room and tracks it", async function () {
     const { factory, alice, bob } = await loadFixture(deployFactoryFixture);
 
-    await factory.connect(alice).createRoom(bob.address, "Salary negotiation", 50, ZERO_ADDR, NO_DEADLINE, TYPE_SALARY);
+    await factory
+      .connect(alice)
+      .createRoom(bob.address, H("Salary negotiation"), 50, ZERO_ADDR, NO_DEADLINE, TYPE_SALARY);
 
     const rooms = await factory.getRooms();
     expect(rooms.length).to.equal(1);
   });
 
-  it("emits RoomCreated event with correct args", async function () {
+  it("emits RoomCreated event with contextHash (not plaintext)", async function () {
     const { factory, alice, bob } = await loadFixture(deployFactoryFixture);
 
-    const tx = factory.connect(alice).createRoom(bob.address, "M&A deal", 50, ZERO_ADDR, NO_DEADLINE, TYPE_SALARY);
+    const expectedHash = H("M&A deal");
+    const tx = factory
+      .connect(alice)
+      .createRoom(bob.address, expectedHash, 50, ZERO_ADDR, NO_DEADLINE, TYPE_SALARY);
 
     await expect(tx)
       .to.emit(factory, "RoomCreated")
       .withArgs(
-        () => true, // room address (dynamic, just check it exists)
+        () => true, // room address (dynamic)
         alice.address,
         bob.address,
-        "M&A deal"
+        expectedHash
       );
   });
 
-  it("created room has correct parties and context", async function () {
+  it("created room has correct parties and contextHash", async function () {
     const { factory, alice, bob } = await loadFixture(deployFactoryFixture);
 
+    const expectedHash = H("VC term sheet");
     const tx = await factory
       .connect(alice)
-      .createRoom(bob.address, "VC term sheet", 50, ZERO_ADDR, NO_DEADLINE, TYPE_SALARY);
-    const receipt = await tx.wait();
+      .createRoom(bob.address, expectedHash, 50, ZERO_ADDR, NO_DEADLINE, TYPE_SALARY);
+    await tx.wait();
 
     const rooms = await factory.getRooms();
     const roomAddress = rooms[0];
@@ -57,7 +67,7 @@ describe("NegotiationFactory", function () {
 
     expect(await room.partyA()).to.equal(alice.address);
     expect(await room.partyB()).to.equal(bob.address);
-    expect(await room.context()).to.equal("VC term sheet");
+    expect(await room.contextHash()).to.equal(expectedHash);
   });
 
   it("can create multiple rooms", async function () {
@@ -65,9 +75,9 @@ describe("NegotiationFactory", function () {
       deployFactoryFixture
     );
 
-    await factory.connect(alice).createRoom(bob.address, "Deal 1", 50, ZERO_ADDR, NO_DEADLINE, TYPE_SALARY);
-    await factory.connect(bob).createRoom(charlie.address, "Deal 2", 50, ZERO_ADDR, NO_DEADLINE, TYPE_SALARY);
-    await factory.connect(charlie).createRoom(alice.address, "Deal 3", 50, ZERO_ADDR, NO_DEADLINE, TYPE_SALARY);
+    await factory.connect(alice).createRoom(bob.address, H("Deal 1"), 50, ZERO_ADDR, NO_DEADLINE, TYPE_SALARY);
+    await factory.connect(bob).createRoom(charlie.address, H("Deal 2"), 50, ZERO_ADDR, NO_DEADLINE, TYPE_SALARY);
+    await factory.connect(charlie).createRoom(alice.address, H("Deal 3"), 50, ZERO_ADDR, NO_DEADLINE, TYPE_SALARY);
 
     const rooms = await factory.getRooms();
     expect(rooms.length).to.equal(3);
@@ -80,9 +90,9 @@ describe("NegotiationFactory", function () {
       deployFactoryFixture
     );
 
-    await factory.connect(alice).createRoom(bob.address, "Deal 1", 50, ZERO_ADDR, NO_DEADLINE, TYPE_SALARY);
-    await factory.connect(alice).createRoom(charlie.address, "Deal 2", 50, ZERO_ADDR, NO_DEADLINE, TYPE_SALARY);
-    await factory.connect(bob).createRoom(charlie.address, "Deal 3", 50, ZERO_ADDR, NO_DEADLINE, TYPE_SALARY);
+    await factory.connect(alice).createRoom(bob.address, H("Deal 1"), 50, ZERO_ADDR, NO_DEADLINE, TYPE_SALARY);
+    await factory.connect(alice).createRoom(charlie.address, H("Deal 2"), 50, ZERO_ADDR, NO_DEADLINE, TYPE_SALARY);
+    await factory.connect(bob).createRoom(charlie.address, H("Deal 3"), 50, ZERO_ADDR, NO_DEADLINE, TYPE_SALARY);
 
     const aliceRooms = await factory.getRoomsByParty(alice.address);
     expect(aliceRooms.length).to.equal(2);
@@ -104,7 +114,7 @@ describe("NegotiationFactory", function () {
 
     await factory
       .connect(alice)
-      .createRoom(bob.address, "OTC ETH/USDC swap", 50, ZERO_ADDR, futureDeadline, TYPE_OTC);
+      .createRoom(bob.address, H("OTC ETH/USDC swap"), 50, ZERO_ADDR, futureDeadline, TYPE_OTC);
 
     const rooms = await factory.getRooms();
     const room = await hre.ethers.getContractAt("NegotiationRoom", rooms[0]);

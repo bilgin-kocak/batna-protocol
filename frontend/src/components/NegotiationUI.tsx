@@ -45,11 +45,21 @@ export function NegotiationUI({ roomAddress }: NegotiationUIProps) {
     functionName: "partyB",
   });
 
-  const { data: context } = useReadContract({
+  const { data: contextHash } = useReadContract({
     address: roomAddress,
     abi: NEGOTIATION_ROOM_ABI,
-    functionName: "context",
+    functionName: "contextHash",
   });
+  // Plaintext lives off-chain — check localStorage for the preimage this
+  // browser cached when creating the room. Falls back to the hash otherwise.
+  const context = (() => {
+    if (!contextHash) return undefined;
+    if (typeof window === "undefined") return undefined;
+    const stored = localStorage.getItem(`batna:context:${contextHash}`);
+    if (stored) return stored;
+    const hash = contextHash as string;
+    return `${hash.slice(0, 10)}…${hash.slice(-6)} (hash)`;
+  })();
 
   const { data: aSubmitted } = useReadContract({
     address: roomAddress,

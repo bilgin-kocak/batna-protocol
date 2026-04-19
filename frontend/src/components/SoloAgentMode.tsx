@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useWriteContract, useWaitForTransactionReceipt } from "wagmi";
 import { useCofheClient, useCofheConnection } from "@cofhe/react";
 import { Encryptable, EncryptStep } from "@cofhe/sdk";
+import { keccak256, toBytes } from "viem";
 import { NEGOTIATION_ROOM_ABI, NEGOTIATION_TYPE } from "@/config/contracts";
 import { deriveAgentPrice } from "@/lib/agentApi";
 
@@ -86,6 +87,13 @@ export function SoloAgentMode({
       setEncryptionStep(null);
 
       if (agentAddress) {
+        // AgentSubmission provenance record — hashed so nothing sensitive lands on-chain.
+        const provenance = {
+          templateId: negotiationType,
+          contextHash: keccak256(toBytes(context)),
+          modelHash: keccak256(toBytes("claude-opus-4-6")),
+          promptVersionHash: keccak256(toBytes(`solo-agent-${typeLabel}-v1`)),
+        } as const;
         writeContract({
           address: roomAddress,
           abi: NEGOTIATION_ROOM_ABI,
@@ -98,6 +106,7 @@ export function SoloAgentMode({
               signature: encrypted.signature as `0x${string}`,
             },
             agentAddress,
+            provenance,
           ],
         });
       } else {

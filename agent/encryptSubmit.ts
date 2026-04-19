@@ -13,6 +13,23 @@ export interface CofheClientLike {
 }
 
 /**
+ * Structured provenance for agent-derived submissions. Mirrors the
+ * `AgentProvenance` struct on NegotiationRoom.sol — recorded in the
+ * `AgentSubmission` event so observers can later verify which template +
+ * model + prompt produced a given reservation.
+ */
+export interface AgentProvenance {
+  /** uint8 — mirrors NegotiationType enum. */
+  templateId: number;
+  /** bytes32 keccak256 of the free-form context the agent read. */
+  contextHash: `0x${string}` | string;
+  /** bytes32 keccak256 of the model identifier (e.g., "claude-opus-4-6"). */
+  modelHash: `0x${string}` | string;
+  /** bytes32 keccak256 of the prompt template version id. */
+  promptVersionHash: `0x${string}` | string;
+}
+
+/**
  * Minimal duck-typed interface for an ethers Contract that exposes the two
  * NegotiationRoom submission entry points.
  */
@@ -23,7 +40,8 @@ export interface NegotiationRoomLike {
     }>;
     submitReservationAsAgent(
       encrypted: unknown,
-      agent: string
+      agent: string,
+      provenance: AgentProvenance
     ): Promise<{ wait(): Promise<{ hash: string } | null> }>;
   };
 }
@@ -42,6 +60,11 @@ export interface EncryptSubmitArgs {
    * with this address as the agent. If unset, calls plain submitReservation.
    */
   agentAddress?: string;
+  /**
+   * Required when agentAddress is set — the provenance record logged to
+   * the AgentSubmission event. Ignored when agentAddress is undefined.
+   */
+  provenance?: AgentProvenance;
 }
 
 export interface EncryptSubmitResult {
@@ -58,6 +81,11 @@ export async function encryptSubmit(args: EncryptSubmitArgs): Promise<EncryptSub
   if (args.derivedPrice < 0n) {
     throw new Error("encryptSubmit: derivedPrice must be >= 0");
   }
+  if (args.agentAddress && !args.provenance) {
+    throw new Error(
+      "encryptSubmit: provenance is required when agentAddress is set"
+    );
+  }
 
   const result = await args.cofheClient
     .encryptInputs([Encryptable.uint64(args.derivedPrice)])
@@ -68,7 +96,7 @@ export async function encryptSubmit(args: EncryptSubmitArgs): Promise<EncryptSub
   const room = args.room.connect(args.signer);
 
   const tx = args.agentAddress
-    ? await room.submitReservationAsAgent(encrypted, args.agentAddress)
+    ? await room.submitReservationAsAgent(encrypted, args.agentAddress, args.provenance!)
     : await room.submitReservation(encrypted);
 
   const receipt = await tx.wait();

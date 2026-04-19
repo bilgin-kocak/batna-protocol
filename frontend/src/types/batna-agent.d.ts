@@ -66,6 +66,13 @@ declare module "@batna/agent" {
     encryptInputs(items: unknown[]): { execute(): Promise<unknown[]> };
   }
 
+  export interface AgentProvenance {
+    templateId: number;
+    contextHash: `0x${string}` | string;
+    modelHash: `0x${string}` | string;
+    promptVersionHash: `0x${string}` | string;
+  }
+
   export interface NegotiationRoomLike {
     connect(signer: unknown): {
       submitReservation(encrypted: unknown): Promise<{
@@ -73,7 +80,8 @@ declare module "@batna/agent" {
       }>;
       submitReservationAsAgent(
         encrypted: unknown,
-        agent: string
+        agent: string,
+        provenance: AgentProvenance
       ): Promise<{ wait(): Promise<{ hash: string } | null> }>;
     };
   }
@@ -84,6 +92,7 @@ declare module "@batna/agent" {
     derivedPrice: bigint;
     cofheClient: CofheClientLike;
     agentAddress?: string;
+    provenance?: AgentProvenance;
   }
 
   export interface EncryptSubmitResult {

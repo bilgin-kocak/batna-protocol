@@ -417,7 +417,7 @@ Key Wave 2 tests:
 | FHE Contracts  | Fhenix CoFHE — `@fhenixprotocol/cofhe-contracts` (InEuint64, FHE.sol) |
 | FHE Client SDK | `@cofhe/sdk` + `@cofhe/react` — client-side encryption + React hooks  |
 | Contracts      | Solidity 0.8.25                                                       |
-| Testing        | Hardhat + `@cofhe/hardhat-plugin` + Mocha/Chai (19 tests)             |
+| Testing        | Hardhat + `@cofhe/hardhat-plugin` + Mocha/Chai (62 tests)             |
 | Frontend       | Next.js 14 + Tailwind CSS                                             |
 | Web3           | wagmi v2 + viem + RainbowKit                                          |
 | Chain          | Arbitrum Sepolia                                                      |

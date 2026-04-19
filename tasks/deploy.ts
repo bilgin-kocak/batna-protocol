@@ -42,9 +42,15 @@ task("create-room", "Create a negotiation room via the factory")
 
     const factory = await hre.ethers.getContractAt("NegotiationFactory", factoryAddr, signer);
 
+    // Context plaintext never goes on-chain — only its keccak256 hash.
+    // Log the preimage client-side so it can be stored off-chain.
+    const contextHash = hre.ethers.keccak256(hre.ethers.toUtf8Bytes(context));
+    console.log("Context plaintext (store off-chain):", context);
+    console.log("Context hash (on-chain):            ", contextHash);
+
     const tx = await factory.createRoom(
       partyb,
-      context,
+      contextHash,
       parseInt(weight),
       auditor,
       BigInt(deadline),

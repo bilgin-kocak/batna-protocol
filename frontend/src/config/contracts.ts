@@ -19,7 +19,7 @@ export const NEGOTIATION_ROOM_ABI = [
     inputs: [
       { internalType: "address", name: "_partyA", type: "address" },
       { internalType: "address", name: "_partyB", type: "address" },
-      { internalType: "string", name: "_context", type: "string" },
+      { internalType: "bytes32", name: "_contextHash", type: "bytes32" },
       { internalType: "uint8", name: "_weightA", type: "uint8" },
       { internalType: "address", name: "_auditor", type: "address" },
       { internalType: "uint256", name: "_deadline", type: "uint256" },
@@ -50,8 +50,28 @@ export const NEGOTIATION_ROOM_ABI = [
     inputs: [
       { indexed: true, internalType: "address", name: "party", type: "address" },
       { indexed: true, internalType: "address", name: "agent", type: "address" },
+      { indexed: false, internalType: "uint8", name: "templateId", type: "uint8" },
+      { indexed: false, internalType: "bytes32", name: "contextHash", type: "bytes32" },
+      { indexed: false, internalType: "bytes32", name: "modelHash", type: "bytes32" },
+      { indexed: false, internalType: "bytes32", name: "promptVersionHash", type: "bytes32" },
     ],
     name: "AgentSubmission",
+    type: "event",
+  },
+  {
+    anonymous: false,
+    inputs: [
+      { indexed: true, internalType: "address", name: "triggeredBy", type: "address" },
+    ],
+    name: "RoomExpired",
+    type: "event",
+  },
+  {
+    anonymous: false,
+    inputs: [
+      { indexed: true, internalType: "address", name: "cancelledBy", type: "address" },
+    ],
+    name: "RoomCancelled",
     type: "event",
   },
   {
@@ -70,9 +90,30 @@ export const NEGOTIATION_ROOM_ABI = [
   },
   {
     inputs: [],
-    name: "context",
-    outputs: [{ internalType: "string", name: "", type: "string" }],
+    name: "contextHash",
+    outputs: [{ internalType: "bytes32", name: "", type: "bytes32" }],
     stateMutability: "view",
+    type: "function",
+  },
+  {
+    inputs: [],
+    name: "status",
+    outputs: [{ internalType: "uint8", name: "", type: "uint8" }],
+    stateMutability: "view",
+    type: "function",
+  },
+  {
+    inputs: [],
+    name: "expireRoom",
+    outputs: [],
+    stateMutability: "nonpayable",
+    type: "function",
+  },
+  {
+    inputs: [],
+    name: "cancelRoom",
+    outputs: [],
+    stateMutability: "nonpayable",
     type: "function",
   },
   {
@@ -171,6 +212,17 @@ export const NEGOTIATION_ROOM_ABI = [
         type: "tuple",
       },
       { internalType: "address", name: "agent", type: "address" },
+      {
+        components: [
+          { internalType: "uint8", name: "templateId", type: "uint8" },
+          { internalType: "bytes32", name: "contextHash", type: "bytes32" },
+          { internalType: "bytes32", name: "modelHash", type: "bytes32" },
+          { internalType: "bytes32", name: "promptVersionHash", type: "bytes32" },
+        ],
+        internalType: "struct NegotiationRoom.AgentProvenance",
+        name: "provenance",
+        type: "tuple",
+      },
     ],
     name: "submitReservationAsAgent",
     outputs: [],
@@ -214,7 +266,7 @@ export const NEGOTIATION_FACTORY_ABI = [
       { indexed: true, internalType: "address", name: "room", type: "address" },
       { indexed: true, internalType: "address", name: "partyA", type: "address" },
       { indexed: true, internalType: "address", name: "partyB", type: "address" },
-      { indexed: false, internalType: "string", name: "context", type: "string" },
+      { indexed: false, internalType: "bytes32", name: "contextHash", type: "bytes32" },
     ],
     name: "RoomCreated",
     type: "event",
@@ -222,7 +274,7 @@ export const NEGOTIATION_FACTORY_ABI = [
   {
     inputs: [
       { internalType: "address", name: "partyB", type: "address" },
-      { internalType: "string", name: "context", type: "string" },
+      { internalType: "bytes32", name: "contextHash", type: "bytes32" },
       { internalType: "uint8", name: "weightA", type: "uint8" },
       { internalType: "address", name: "auditor", type: "address" },
       { internalType: "uint256", name: "deadline", type: "uint256" },
@@ -259,3 +311,21 @@ export const NEGOTIATION_FACTORY_ABI = [
     type: "function",
   },
 ] as const;
+
+/** Keccak256 hash of a UTF-8 string — matches the contract's contextHash convention. */
+export function hashContext(text: string): `0x${string}` {
+  // Avoid pulling a crypto dep into the bundle — let viem/ethers handle this
+  // at call sites. This function is a stub; call sites should import the
+  // real keccak256 from viem or ethers directly.
+  throw new Error(
+    "Call sites should hash via viem's keccak256(toBytes(text)) or ethers.keccak256(ethers.toUtf8Bytes(text))."
+  );
+}
+
+/** Room status enum mirrors the contract. */
+export const ROOM_STATUS = {
+  OPEN: 0,
+  RESOLVED: 1,
+  EXPIRED: 2,
+  CANCELLED: 3,
+} as const;

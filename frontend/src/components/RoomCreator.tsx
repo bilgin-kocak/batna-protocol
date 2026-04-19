@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useAccount, useWriteContract, useWaitForTransactionReceipt } from "wagmi";
+import { keccak256, toBytes } from "viem";
 import {
   FACTORY_ADDRESS,
   NEGOTIATION_FACTORY_ABI,
@@ -41,13 +42,22 @@ export function RoomCreator({ onRoomCreated }: RoomCreatorProps) {
       deadlineHours > 0
         ? BigInt(Math.floor(Date.now() / 1000) + deadlineHours * 3600)
         : BigInt(0);
+    // Hash the context client-side — plaintext never goes on-chain.
+    const contextHash = keccak256(toBytes(context));
+    // Persist the preimage in localStorage keyed by the hash so future
+    // visitors with the same browser can still see the human-readable context.
+    try {
+      localStorage.setItem(`batna:context:${contextHash}`, context);
+    } catch {
+      // ignore storage errors (private mode, quotas, etc.)
+    }
     writeContract({
       address: FACTORY_ADDRESS,
       abi: NEGOTIATION_FACTORY_ABI,
       functionName: "createRoom",
       args: [
         partyB as `0x${string}`,
-        context,
+        contextHash,
         weight,
         "0x0000000000000000000000000000000000000000",
         deadline,

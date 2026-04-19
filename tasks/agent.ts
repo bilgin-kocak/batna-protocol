@@ -79,6 +79,9 @@ task(
       signer
     );
 
+    // contextHash is what goes on-chain; the plaintext lives off-chain
+    const contextHash = hre.ethers.keccak256(hre.ethers.toUtf8Bytes(args.context));
+
     if (!roomAddress) {
       if (!args.counterparty) {
         throw new Error("Either --room or --counterparty must be provided");
@@ -86,7 +89,7 @@ task(
       console.log("\n[2/3] No --room provided. Creating a new room via factory...");
       const tx = await factory.createRoom(
         args.counterparty,
-        args.context.slice(0, 200), // truncate context to keep storage cheap
+        contextHash,
         parseInt(args.weight),
         "0x0000000000000000000000000000000000000000",
         0,
@@ -97,6 +100,7 @@ task(
       roomAddress = rooms[rooms.length - 1];
       console.log(`        createRoom tx:  ${receipt?.hash}`);
       console.log(`        room address:   ${roomAddress}`);
+      console.log(`        contextHash:    ${contextHash}`);
     } else {
       console.log(`\n[2/3] Using existing room ${roomAddress}`);
     }
@@ -119,6 +123,16 @@ task(
       derivedPrice: derived.price,
       cofheClient: cofheClient as any,
       agentAddress: signer.address,
+      provenance: {
+        templateId: negotiationType,
+        contextHash,
+        modelHash: hre.ethers.keccak256(
+          hre.ethers.toUtf8Bytes(args.model)
+        ),
+        promptVersionHash: hre.ethers.keccak256(
+          hre.ethers.toUtf8Bytes(`${template.name}-v1`)
+        ),
+      },
     });
 
     console.log(`        submit tx:      ${result.txHash}`);

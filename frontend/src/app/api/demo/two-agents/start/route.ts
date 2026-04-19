@@ -1,5 +1,6 @@
 import { NextRequest } from "next/server";
 import { ethers } from "ethers";
+import { keccak256, toBytes } from "viem";
 import {
   derivePrice,
   encryptSubmit,
@@ -128,9 +129,11 @@ export async function POST(req: NextRequest) {
           FACTORY_ABI as any,
           walletA
         );
+        // Hash the party-A context — plaintext stays off-chain
+        const roomContextHash = keccak256(toBytes(body.contextA));
         const createTx = await factory.createRoom(
           walletB.address,
-          body.contextA.slice(0, 200),
+          roomContextHash,
           weightA,
           "0x0000000000000000000000000000000000000000",
           BigInt(0),
@@ -155,6 +158,14 @@ export async function POST(req: NextRequest) {
           derivedPrice: derivedA.price,
           cofheClient: cofheA as any,
           agentAddress: walletA.address,
+          provenance: {
+            templateId: body.negotiationType,
+            contextHash: keccak256(toBytes(body.contextA)),
+            modelHash: keccak256(toBytes("claude-opus-4-6")),
+            promptVersionHash: keccak256(
+              toBytes(`${template.name}-partyA-v1`)
+            ),
+          },
         });
 
         write({
@@ -181,6 +192,14 @@ export async function POST(req: NextRequest) {
           derivedPrice: derivedB.price,
           cofheClient: cofheB as any,
           agentAddress: walletB.address,
+          provenance: {
+            templateId: body.negotiationType,
+            contextHash: keccak256(toBytes(body.contextB)),
+            modelHash: keccak256(toBytes("claude-opus-4-6")),
+            promptVersionHash: keccak256(
+              toBytes(`${template.name}-partyB-v1`)
+            ),
+          },
         });
 
         write({

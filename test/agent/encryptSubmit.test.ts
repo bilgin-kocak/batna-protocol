@@ -3,6 +3,16 @@ import hre from "hardhat";
 import { mock_expectPlaintext } from "@cofhe/hardhat-plugin";
 import { encryptSubmit } from "../../agent";
 
+const H = (s: string): string =>
+  hre.ethers.keccak256(hre.ethers.toUtf8Bytes(s));
+
+const DEFAULT_PROVENANCE = {
+  templateId: 1,
+  contextHash: H("test-context"),
+  modelHash: H("claude-opus-4-6"),
+  promptVersionHash: H("v1"),
+};
+
 /**
  * Integration test for the agent's encryptSubmit helper.
  *
@@ -19,7 +29,7 @@ describe("agent/encryptSubmit", function () {
     const room = await Room.deploy(
       alice.address,
       bob.address,
-      "Agent SDK e2e test",
+      H("Agent SDK e2e test"),
       50,
       "0x0000000000000000000000000000000000000000",
       0,
@@ -43,7 +53,7 @@ describe("agent/encryptSubmit", function () {
     expect(await room.aSubmitted()).to.be.true;
   });
 
-  it("submits via submitReservationAsAgent when agentAddress provided", async function () {
+  it("submits via submitReservationAsAgent when agentAddress + provenance provided", async function () {
     const { room, alice, client } = await deployRoom();
     await hre.cofhe.connectWithHardhatSigner(client, alice);
 
@@ -55,16 +65,23 @@ describe("agent/encryptSubmit", function () {
       derivedPrice: 130000n,
       cofheClient: client as any,
       agentAddress: agentSigner.address,
+      provenance: DEFAULT_PROVENANCE,
     });
 
     expect(result.txHash).to.be.a("string");
     expect(await room.aSubmitted()).to.be.true;
 
-    // Verify the AgentSubmission event fired with the agent address
+    // Verify the AgentSubmission event fired with party + agent + provenance
     const events = await room.queryFilter(room.filters.AgentSubmission());
     expect(events.length).to.equal(1);
     expect(events[0].args!.party).to.equal(alice.address);
     expect(events[0].args!.agent).to.equal(agentSigner.address);
+    expect(events[0].args!.templateId).to.equal(DEFAULT_PROVENANCE.templateId);
+    expect(events[0].args!.contextHash).to.equal(DEFAULT_PROVENANCE.contextHash);
+    expect(events[0].args!.modelHash).to.equal(DEFAULT_PROVENANCE.modelHash);
+    expect(events[0].args!.promptVersionHash).to.equal(
+      DEFAULT_PROVENANCE.promptVersionHash
+    );
   });
 
   it("end-to-end: both parties submit via encryptSubmit and the room resolves to the midpoint", async function () {
@@ -105,6 +122,26 @@ describe("agent/encryptSubmit", function () {
     } catch (err) {
       threw = true;
       expect((err as Error).message).to.match(/derivedPrice must be >= 0/);
+    }
+    expect(threw).to.be.true;
+  });
+
+  it("throws when agentAddress is set but provenance is missing", async function () {
+    const { room, alice, client } = await deployRoom();
+    const [, , , , agentSigner] = await hre.ethers.getSigners();
+
+    let threw = false;
+    try {
+      await encryptSubmit({
+        room: room as any,
+        signer: alice,
+        derivedPrice: 130000n,
+        cofheClient: client as any,
+        agentAddress: agentSigner.address,
+      });
+    } catch (err) {
+      threw = true;
+      expect((err as Error).message).to.match(/provenance is required/);
     }
     expect(threw).to.be.true;
   });

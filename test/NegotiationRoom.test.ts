@@ -4,6 +4,19 @@ import { loadFixture } from "@nomicfoundation/hardhat-network-helpers";
 import { mock_expectPlaintext } from "@cofhe/hardhat-plugin";
 import { Encryptable } from "@cofhe/sdk";
 
+// Helper: keccak256 of a UTF-8 string — matches the frontend's contextHash.
+const H = (s: string): string =>
+  hre.ethers.keccak256(hre.ethers.toUtf8Bytes(s));
+
+// Default AgentProvenance used when a test doesn't care about the provenance
+// fields. Real agent flows should populate these with real values.
+const DEFAULT_PROVENANCE = {
+  templateId: 1, // SALARY
+  contextHash: H(""),
+  modelHash: H("claude-opus-4-6"),
+  promptVersionHash: H("v1"),
+};
+
 describe("NegotiationRoom", function () {
   async function deployRoomFixture() {
     const [owner, alice, bob, stranger] = await hre.ethers.getSigners();
@@ -13,7 +26,7 @@ describe("NegotiationRoom", function () {
     const room = await Room.deploy(
       alice.address,
       bob.address,
-      "Salary negotiation: Senior Engineer",
+      H("Salary negotiation: Senior Engineer"),
       50, // equal weight (standard midpoint)
       "0x0000000000000000000000000000000000000000", // no auditor
       0, // no deadline
@@ -173,9 +186,10 @@ describe("NegotiationRoom", function () {
       .encryptInputs([Encryptable.uint64(130000n)])
       .execute();
 
+    // After resolution, status != OPEN so the new onlyOpen modifier fires first.
     await expect(
       room.connect(alice).submitReservation(encrypted)
-    ).to.be.revertedWith("Already resolved");
+    ).to.be.revertedWith("Room not open");
   });
 
   // ── Weighted Midpoint ────────────────────────────────────────
@@ -186,7 +200,7 @@ describe("NegotiationRoom", function () {
 
     const Room = await hre.ethers.getContractFactory("NegotiationRoom");
     // weightA=60 means: settlement = (minA*60 + maxB*40) / 100
-    const room = await Room.deploy(alice.address, bob.address, "Weighted deal", 60, "0x0000000000000000000000000000000000000000", 0, 1);
+    const room = await Room.deploy(alice.address, bob.address, H("Weighted deal"), 60, "0x0000000000000000000000000000000000000000", 0, 1);
 
     // Alice floor: 100000, Bob ceiling: 200000
     // Settlement = (100000*60 + 200000*40) / 100 = (6000000 + 8000000) / 100 = 140000
@@ -257,7 +271,7 @@ describe("NegotiationRoom", function () {
     const room = await Room.deploy(
       alice.address,
       bob.address,
-      "Deadline test",
+      H("Deadline test"),
       50,
       "0x0000000000000000000000000000000000000000",
       targetDeadline,
@@ -280,7 +294,7 @@ describe("NegotiationRoom", function () {
     const room = await Room.deploy(
       alice.address,
       bob.address,
-      "Expired deal",
+      H("Expired deal"),
       50,
       "0x0000000000000000000000000000000000000000",
       expiredDeadline,
@@ -319,7 +333,7 @@ describe("NegotiationRoom", function () {
     const room = await Room.deploy(
       alice.address,
       bob.address,
-      "Tender for Series A acquisition",
+      H("Tender for Series A acquisition"),
       50,
       "0x0000000000000000000000000000000000000000",
       0,
@@ -331,26 +345,42 @@ describe("NegotiationRoom", function () {
 
   // ── Wave 2: submitReservationAsAgent ────────────────────────
 
-  it("submitReservationAsAgent emits PartySubmitted and AgentSubmission", async function () {
+  it("submitReservationAsAgent emits PartySubmitted and AgentSubmission with full provenance", async function () {
     const { room, alice, client } = await loadFixture(deployRoomFixture);
 
     // Use a real signer address so ethers checksum casing is consistent
     const [, , , , agentSigner] = await hre.ethers.getSigners();
     const agentAddress = agentSigner.address;
 
+    const provenance = {
+      templateId: 1, // SALARY
+      contextHash: H("Senior backend engineer — Bay Area — $165K competing"),
+      modelHash: H("claude-opus-4-6"),
+      promptVersionHash: H("salary-v1"),
+    };
+
     await hre.cofhe.connectWithHardhatSigner(client, alice);
     const [encrypted] = await client
       .encryptInputs([Encryptable.uint64(130000n)])
       .execute();
 
-    const tx = await room.connect(alice).submitReservationAsAgent(encrypted, agentAddress);
+    const tx = await room
+      .connect(alice)
+      .submitReservationAsAgent(encrypted, agentAddress, provenance);
 
     await expect(tx)
       .to.emit(room, "PartySubmitted")
       .withArgs(alice.address);
     await expect(tx)
       .to.emit(room, "AgentSubmission")
-      .withArgs(alice.address, agentAddress);
+      .withArgs(
+        alice.address,
+        agentAddress,
+        provenance.templateId,
+        provenance.contextHash,
+        provenance.modelHash,
+        provenance.promptVersionHash
+      );
   });
 
   it("submitReservationAsAgent rejects non-party callers", async function () {
@@ -362,7 +392,9 @@ describe("NegotiationRoom", function () {
       .execute();
 
     await expect(
-      room.connect(stranger).submitReservationAsAgent(encrypted, stranger.address)
+      room
+        .connect(stranger)
+        .submitReservationAsAgent(encrypted, stranger.address, DEFAULT_PROVENANCE)
     ).to.be.revertedWith("Not a party");
   });
 
@@ -374,7 +406,9 @@ describe("NegotiationRoom", function () {
     const [encA] = await client
       .encryptInputs([Encryptable.uint64(130000n)])
       .execute();
-    await room.connect(alice).submitReservationAsAgent(encA, alice.address);
+    await room
+      .connect(alice)
+      .submitReservationAsAgent(encA, alice.address, DEFAULT_PROVENANCE);
 
     await encryptAndSubmit(client, bob, room, 145000n);
 
@@ -393,7 +427,7 @@ describe("NegotiationRoom", function () {
     const room = await Room.deploy(
       alice.address,
       bob.address,
-      "Audited salary negotiation",
+      H("Audited salary negotiation"),
       50,
       auditor.address, // auditor configured
       0,
@@ -436,7 +470,7 @@ describe("NegotiationRoom", function () {
     const room = await Room.deploy(
       alice.address,
       bob.address,
-      "weightA=100",
+      H("weightA=100"),
       100,
       "0x0000000000000000000000000000000000000000",
       0,
@@ -459,7 +493,7 @@ describe("NegotiationRoom", function () {
     const room = await Room.deploy(
       alice.address,
       bob.address,
-      "weightA=0",
+      H("weightA=0"),
       0,
       "0x0000000000000000000000000000000000000000",
       0,
@@ -482,7 +516,7 @@ describe("NegotiationRoom", function () {
     const room = await Room.deploy(
       alice.address,
       bob.address,
-      "Large deal within safe range",
+      H("Large deal within safe range"),
       50,
       "0x0000000000000000000000000000000000000000",
       0,
@@ -501,5 +535,120 @@ describe("NegotiationRoom", function () {
     const expected = (minA + maxB) / 2n;
     const encResult = await room.getEncryptedResult();
     await mock_expectPlaintext(alice.provider, encResult, expected);
+  });
+
+  // ── Wave 2.1: contextHash storage (no plaintext on-chain) ────
+
+  it("stores contextHash as bytes32; plaintext never touches calldata/state", async function () {
+    const { room } = await loadFixture(deployRoomFixture);
+    const expected = H("Salary negotiation: Senior Engineer");
+    expect(await room.contextHash()).to.equal(expected);
+  });
+
+  // ── Wave 2.1: RoomStatus lifecycle ───────────────────────────
+
+  it("initial status is OPEN; resolved flips to RESOLVED on both-side submission", async function () {
+    const { room, alice, bob, client } = await loadFixture(deployRoomFixture);
+
+    expect(await room.status()).to.equal(0); // OPEN
+
+    await encryptAndSubmit(client, alice, room, 130000n);
+    expect(await room.status()).to.equal(0); // still OPEN after just one submission
+
+    await encryptAndSubmit(client, bob, room, 145000n);
+    expect(await room.status()).to.equal(1); // RESOLVED
+    expect(await room.resolved()).to.be.true; // legacy flag still set
+  });
+
+  it("expireRoom transitions to EXPIRED past the deadline", async function () {
+    const [owner, alice, bob] = await hre.ethers.getSigners();
+    await hre.cofhe.createClientWithBatteries(owner);
+    const Room = await hre.ethers.getContractFactory("NegotiationRoom");
+
+    const latest = await hre.ethers.provider.getBlock("latest");
+    const deadline = latest!.timestamp + 60;
+    const room = await Room.deploy(
+      alice.address,
+      bob.address,
+      H("expire me"),
+      50,
+      "0x0000000000000000000000000000000000000000",
+      deadline,
+      1
+    );
+
+    // Fast-forward past the deadline
+    await hre.ethers.provider.send("evm_setNextBlockTimestamp", [deadline + 1]);
+    await hre.ethers.provider.send("evm_mine", []);
+
+    await expect(room.connect(alice).expireRoom())
+      .to.emit(room, "RoomExpired")
+      .withArgs(alice.address);
+
+    expect(await room.status()).to.equal(2); // EXPIRED
+  });
+
+  it("expireRoom reverts before deadline", async function () {
+    const [owner, alice, bob] = await hre.ethers.getSigners();
+    await hre.cofhe.createClientWithBatteries(owner);
+    const Room = await hre.ethers.getContractFactory("NegotiationRoom");
+
+    const latest = await hre.ethers.provider.getBlock("latest");
+    const room = await Room.deploy(
+      alice.address,
+      bob.address,
+      H("future"),
+      50,
+      "0x0000000000000000000000000000000000000000",
+      latest!.timestamp + 3600,
+      1
+    );
+
+    await expect(room.connect(alice).expireRoom()).to.be.revertedWith(
+      "Deadline not passed"
+    );
+  });
+
+  it("expireRoom reverts when no deadline is set (deadline == 0)", async function () {
+    const { room, alice } = await loadFixture(deployRoomFixture);
+
+    await expect(room.connect(alice).expireRoom()).to.be.revertedWith(
+      "No deadline set"
+    );
+  });
+
+  it("cancelRoom transitions to CANCELLED only before any submission", async function () {
+    const { room, alice, bob } = await loadFixture(deployRoomFixture);
+
+    await expect(room.connect(alice).cancelRoom())
+      .to.emit(room, "RoomCancelled")
+      .withArgs(alice.address);
+
+    expect(await room.status()).to.equal(3); // CANCELLED
+  });
+
+  it("cancelRoom reverts after a submission exists", async function () {
+    const { room, alice, bob, client } = await loadFixture(deployRoomFixture);
+
+    await encryptAndSubmit(client, alice, room, 130000n);
+
+    await expect(room.connect(bob).cancelRoom()).to.be.revertedWith(
+      "Submission already made"
+    );
+  });
+
+  it("submissions revert after the room is cancelled", async function () {
+    const { room, alice, bob, client } = await loadFixture(deployRoomFixture);
+
+    await room.connect(alice).cancelRoom();
+
+    await hre.cofhe.connectWithHardhatSigner(client, bob);
+    const [enc] = await client
+      .encryptInputs([Encryptable.uint64(150000n)])
+      .execute();
+
+    await expect(
+      room.connect(bob).submitReservation(enc)
+    ).to.be.revertedWith("Room not open");
   });
 });
