@@ -18,6 +18,12 @@ import {
 
 export * from "./_sessions";
 
+/** Auto-prepend 0x if missing, so env vars work with or without the prefix. */
+function normalizeKey(key: string): `0x${string}` {
+  const trimmed = key.trim();
+  return (trimmed.startsWith("0x") ? trimmed : `0x${trimmed}`) as `0x${string}`;
+}
+
 /**
  * Loads the two demo agent ethers wallets from env vars.
  * Throws with a clear message if either is missing.
@@ -34,10 +40,15 @@ export function getDemoWallets() {
     );
   }
 
-  const walletA = new ethers.Wallet(keyA, provider);
-  const walletB = new ethers.Wallet(keyB, provider);
+  const walletA = new ethers.Wallet(normalizeKey(keyA), provider);
+  const walletB = new ethers.Wallet(normalizeKey(keyB), provider);
 
   return { walletA, walletB, provider, rpc };
+}
+
+/** Exported so the start route can pass the normalized hex to the CoFHE client helper. */
+export function normalizeDemoKey(key: string): `0x${string}` {
+  return normalizeKey(key);
 }
 
 /**
@@ -45,7 +56,7 @@ export function getDemoWallets() {
  * The CoFHE client uses viem internally; the actual contract submission is done with ethers.
  */
 export async function createConnectedCofheClient(privateKeyHex: string) {
-  const account = privateKeyToAccount(privateKeyHex as `0x${string}`);
+  const account = privateKeyToAccount(normalizeKey(privateKeyHex));
   const rpc = process.env.ARBITRUM_SEPOLIA_RPC_URL || "https://sepolia-rollup.arbitrum.io/rpc";
 
   const publicClient = createPublicClient({
