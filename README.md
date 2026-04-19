@@ -324,7 +324,7 @@ DEMO_AGENT_B_PRIVATE_KEY=0x...    # pre-funded on Arbitrum Sepolia
 
 ```bash
 npx hardhat agent-negotiate \
-  --factory 0x1221aBCe7D8FB1ba4cF9293E94539cb45e7857fE \
+  --factory 0xE387f4FDa884FCc976F3f27853E34FdB895E9fBE \
   --counterparty 0x... \
   --role partyA \
   --type salary \
@@ -334,10 +334,11 @@ npx hardhat agent-negotiate \
 
 ### Deployed Contracts (Arbitrum Sepolia)
 
-| Contract               | Address                                                                                                                        |
-| ---------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
-| **NegotiationFactory** | [`0x1221aBCe7D8FB1ba4cF9293E94539cb45e7857fE`](https://sepolia.arbiscan.io/address/0x1221aBCe7D8FB1ba4cF9293E94539cb45e7857fE) |
-| Deployer               | `0x48D185bc646534597E25199dd4d73692ebD98BAc`                                                                                   |
+| Contract                         | Address                                                                                                                        |
+| -------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| **NegotiationFactory (Wave 2)**  | [`0xE387f4FDa884FCc976F3f27853E34FdB895E9fBE`](https://sepolia.arbiscan.io/address/0xE387f4FDa884FCc976F3f27853E34FdB895E9fBE) |
+| NegotiationFactory (Wave 1)      | [`0x1221aBCe7D8FB1ba4cF9293E94539cb45e7857fE`](https://sepolia.arbiscan.io/address/0x1221aBCe7D8FB1ba4cF9293E94539cb45e7857fE) |
+| Deployer                         | `0x48D185bc646534597E25199dd4d73692ebD98BAc`                                                                                   |
 
 ### Deploy to Arbitrum Sepolia
 
@@ -351,7 +352,7 @@ npx hardhat deploy-factory --network arb-sepolia
 
 # Create a negotiation room
 npx hardhat create-room \
-  --factory 0x1221aBCe7D8FB1ba4cF9293E94539cb45e7857fE \
+  --factory 0xE387f4FDa884FCc976F3f27853E34FdB895E9fBE \
   --partyb <COUNTERPARTY_ADDRESS> \
   --context "Salary negotiation: Senior Engineer" \
   --weight 50 \

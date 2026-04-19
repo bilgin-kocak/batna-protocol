@@ -1,6 +1,6 @@
 export const FACTORY_ADDRESS =
   (process.env.NEXT_PUBLIC_FACTORY_ADDRESS as `0x${string}`) ||
-  "0x1221aBCe7D8FB1ba4cF9293E94539cb45e7857fE";
+  "0xE387f4FDa884FCc976F3f27853E34FdB895E9fBE";
 
 /**
  * NegotiationType enum mirrors `enum NegotiationType { GENERIC, SALARY, OTC, MA }`
