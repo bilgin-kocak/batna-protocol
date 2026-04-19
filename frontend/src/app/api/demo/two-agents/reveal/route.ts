@@ -52,12 +52,15 @@ export async function POST(req: NextRequest) {
     const encZopaCtHash: bigint = await room.getEncryptedZopa();
     const encResultCtHash: bigint = await room.getEncryptedResult();
 
-    // Threshold-decrypt
+    // Threshold-decrypt. Both handles were marked with FHE.allowPublic() in
+    // _resolve(), so no permit is required — withoutPermit() is the right mode.
     const zopaDec = await (cofhe as any)
       .decryptForTx(encZopaCtHash, FheTypes.Bool)
+      .withoutPermit()
       .execute();
     const resultDec = await (cofhe as any)
       .decryptForTx(encResultCtHash, FheTypes.Uint64)
+      .withoutPermit()
       .execute();
 
     const zopaBool = Boolean(zopaDec.plaintext);
