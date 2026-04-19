@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest } from "next/server";
 import { ethers } from "ethers";
 import {
   derivePrice,
@@ -7,17 +7,18 @@ import {
   NegotiationType,
 } from "@batna/agent";
 import {
-  newSession,
-  updateSession,
   getDemoWallets,
   createConnectedCofheClient,
   FACTORY_ABI,
   ROOM_ABI,
   FACTORY_ADDRESS,
 } from "../_lib";
+import type { BattleState } from "../_sessions";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+// Bump from the 10s default so the whole battle can run inside one Lambda.
+export const maxDuration = 60;
 
 interface StartRequest {
   negotiationType: number;
@@ -25,6 +26,16 @@ interface StartRequest {
   contextB: string;
   weightA?: number;
   currency?: string;
+}
+
+interface BattleEvent {
+  state: BattleState;
+  roomAddress?: string;
+  txHashA?: string;
+  txHashB?: string;
+  derivedA?: string;
+  derivedB?: string;
+  error?: string;
 }
 
 function isValidType(value: unknown): value is NegotiationType {
@@ -35,141 +46,175 @@ function isValidType(value: unknown): value is NegotiationType {
   );
 }
 
+/**
+ * Streams the full Two-Agent Battle as an NDJSON response.
+ *
+ * Each line is a complete JSON object describing the latest state. The client
+ * reads the stream with fetch+ReadableStream and updates the UI on each line.
+ *
+ * This keeps the entire battle inside ONE Lambda invocation — no cross-request
+ * state (which wouldn't persist on Vercel), no polling, no external KV.
+ */
 export async function POST(req: NextRequest) {
   let body: StartRequest;
   try {
     body = (await req.json()) as StartRequest;
   } catch {
-    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
+    return json({ error: "Invalid JSON body" }, 400);
   }
 
   if (!isValidType(body.negotiationType)) {
-    return NextResponse.json(
-      { error: "negotiationType must be 0..3" },
-      { status: 400 }
-    );
+    return json({ error: "negotiationType must be 0..3" }, 400);
   }
   if (!body.contextA || !body.contextB) {
-    return NextResponse.json(
-      { error: "contextA and contextB are required" },
-      { status: 400 }
-    );
+    return json({ error: "contextA and contextB are required" }, 400);
   }
   if (!process.env.ANTHROPIC_API_KEY) {
-    return NextResponse.json(
-      { error: "Server missing ANTHROPIC_API_KEY" },
-      { status: 500 }
-    );
+    return json({ error: "Server missing ANTHROPIC_API_KEY" }, 500);
   }
 
   let template;
   try {
     template = getTemplate(body.negotiationType);
   } catch (err) {
-    return NextResponse.json({ error: (err as Error).message }, { status: 400 });
+    return json({ error: (err as Error).message }, 400);
   }
 
-  const session = newSession();
+  const encoder = new TextEncoder();
 
-  // Kick off the battle in the background. The browser polls /status for progress.
-  void runBattle(session.id, body, template).catch((err) => {
-    updateSession(session.id, {
-      state: "error",
-      error: err instanceof Error ? err.message : String(err),
-    });
+  const stream = new ReadableStream<Uint8Array>({
+    async start(controller) {
+      const write = (event: BattleEvent) => {
+        controller.enqueue(encoder.encode(JSON.stringify(event) + "\n"));
+      };
+
+      try {
+        const { walletA, walletB } = getDemoWallets();
+        const weightA = body.weightA ?? 50;
+
+        write({ state: "initializing" });
+
+        // Phase 1 — derive both reservation prices in parallel
+        write({ state: "deriving_a" });
+        const [derivedA, derivedB] = await Promise.all([
+          derivePrice({
+            template,
+            role: "partyA",
+            context: body.contextA,
+            currency: body.currency,
+          }),
+          derivePrice({
+            template,
+            role: "partyB",
+            context: body.contextB,
+            currency: body.currency,
+          }),
+        ]);
+
+        write({
+          state: "deriving_b",
+          derivedA: derivedA.price.toString(),
+          derivedB: derivedB.price.toString(),
+        });
+
+        // Phase 2 — deploy the room
+        write({
+          state: "creating_room",
+          derivedA: derivedA.price.toString(),
+          derivedB: derivedB.price.toString(),
+        });
+        const factory = new ethers.Contract(
+          FACTORY_ADDRESS,
+          FACTORY_ABI as any,
+          walletA
+        );
+        const createTx = await factory.createRoom(
+          walletB.address,
+          body.contextA.slice(0, 200),
+          weightA,
+          "0x0000000000000000000000000000000000000000",
+          BigInt(0),
+          body.negotiationType
+        );
+        await createTx.wait();
+        const rooms: string[] = await factory.getRooms();
+        const roomAddress = rooms[rooms.length - 1];
+
+        // Phase 3 — encrypt + submit party A
+        write({
+          state: "encrypting_a",
+          roomAddress,
+          derivedA: derivedA.price.toString(),
+          derivedB: derivedB.price.toString(),
+        });
+        const cofheA = await createConnectedCofheClient(walletA.privateKey);
+        const roomFromA = new ethers.Contract(roomAddress, ROOM_ABI as any, walletA);
+        const resultA = await encryptSubmit({
+          room: roomFromA as any,
+          signer: walletA,
+          derivedPrice: derivedA.price,
+          cofheClient: cofheA as any,
+          agentAddress: walletA.address,
+        });
+
+        write({
+          state: "submitted_a",
+          roomAddress,
+          txHashA: resultA.txHash,
+          derivedA: derivedA.price.toString(),
+          derivedB: derivedB.price.toString(),
+        });
+
+        // Phase 4 — encrypt + submit party B (the room auto-resolves here)
+        write({
+          state: "encrypting_b",
+          roomAddress,
+          txHashA: resultA.txHash,
+          derivedA: derivedA.price.toString(),
+          derivedB: derivedB.price.toString(),
+        });
+        const cofheB = await createConnectedCofheClient(walletB.privateKey);
+        const roomFromB = new ethers.Contract(roomAddress, ROOM_ABI as any, walletB);
+        const resultB = await encryptSubmit({
+          room: roomFromB as any,
+          signer: walletB,
+          derivedPrice: derivedB.price,
+          cofheClient: cofheB as any,
+          agentAddress: walletB.address,
+        });
+
+        write({
+          state: "resolved",
+          roomAddress,
+          txHashA: resultA.txHash,
+          txHashB: resultB.txHash,
+          derivedA: derivedA.price.toString(),
+          derivedB: derivedB.price.toString(),
+        });
+
+        controller.close();
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        controller.enqueue(
+          encoder.encode(JSON.stringify({ state: "error", error: msg }) + "\n")
+        );
+        controller.close();
+      }
+    },
   });
 
-  return NextResponse.json({ sessionId: session.id });
+  return new Response(stream, {
+    headers: {
+      "Content-Type": "application/x-ndjson",
+      "Cache-Control": "no-store, no-transform",
+      "X-Accel-Buffering": "no",
+    },
+  });
 }
 
-async function runBattle(
-  sessionId: string,
-  body: StartRequest,
-  template: ReturnType<typeof getTemplate>
-) {
-  let walletA: ethers.Wallet;
-  let walletB: ethers.Wallet;
-  try {
-    const wallets = getDemoWallets();
-    walletA = wallets.walletA;
-    walletB = wallets.walletB;
-  } catch (err) {
-    updateSession(sessionId, {
-      state: "error",
-      error: (err as Error).message,
-    });
-    return;
-  }
-
-  // Phase A: derive both prices in parallel
-  updateSession(sessionId, { state: "deriving_a" });
-  const [derivedA, derivedB] = await Promise.all([
-    derivePrice({
-      template,
-      role: "partyA",
-      context: body.contextA,
-      currency: body.currency,
-    }),
-    derivePrice({
-      template,
-      role: "partyB",
-      context: body.contextB,
-      currency: body.currency,
-    }),
-  ]);
-  updateSession(sessionId, {
-    state: "deriving_b",
-    derivedA: derivedA.price.toString(),
-    derivedB: derivedB.price.toString(),
-    rawResponseA: derivedA.rawResponse,
-    rawResponseB: derivedB.rawResponse,
-  });
-
-  // Phase B: walletA creates a fresh room with walletB as counterparty
-  updateSession(sessionId, { state: "creating_room" });
-  const factory = new ethers.Contract(FACTORY_ADDRESS, FACTORY_ABI as any, walletA);
-  const createTx = await factory.createRoom(
-    walletB.address,
-    body.contextA.slice(0, 200),
-    body.weightA ?? 50,
-    "0x0000000000000000000000000000000000000000",
-    BigInt(0),
-    body.negotiationType
-  );
-  await createTx.wait();
-  const rooms: string[] = await factory.getRooms();
-  const roomAddress = rooms[rooms.length - 1];
-  updateSession(sessionId, { roomAddress });
-
-  // Phase C: encrypt + submit for A
-  updateSession(sessionId, { state: "encrypting_a" });
-  const cofheA = await createConnectedCofheClient(walletA.privateKey);
-  const roomFromA = new ethers.Contract(roomAddress, ROOM_ABI as any, walletA);
-  const resultA = await encryptSubmit({
-    room: roomFromA as any,
-    signer: walletA,
-    derivedPrice: derivedA.price,
-    cofheClient: cofheA as any,
-    agentAddress: walletA.address,
-  });
-  updateSession(sessionId, {
-    state: "submitted_a",
-    txHashA: resultA.txHash,
-  });
-
-  // Phase D: encrypt + submit for B (auto-resolves on the second submit)
-  updateSession(sessionId, { state: "encrypting_b" });
-  const cofheB = await createConnectedCofheClient(walletB.privateKey);
-  const roomFromB = new ethers.Contract(roomAddress, ROOM_ABI as any, walletB);
-  const resultB = await encryptSubmit({
-    room: roomFromB as any,
-    signer: walletB,
-    derivedPrice: derivedB.price,
-    cofheClient: cofheB as any,
-    agentAddress: walletB.address,
-  });
-  updateSession(sessionId, {
-    state: "resolved",
-    txHashB: resultB.txHash,
+function json(data: unknown, status: number) {
+  return new Response(JSON.stringify(data), {
+    status,
+    headers: { "Content-Type": "application/json" },
   });
 }

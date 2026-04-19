@@ -41,33 +41,34 @@ export type BattleState =
   | "resolved"
   | "error";
 
-export interface BattleSession {
-  id: string;
-  createdAt: number;
+/**
+ * A single frame of battle progress emitted by the streaming /start endpoint.
+ * All optional fields accumulate — each event is a full snapshot of current state.
+ */
+export interface BattleEvent {
   state: BattleState;
   roomAddress?: string;
   txHashA?: string;
   txHashB?: string;
   derivedA?: string;
   derivedB?: string;
-  rawResponseA?: string;
-  rawResponseB?: string;
   error?: string;
-  // Populated by the reveal endpoint
-  revealing?: boolean;
-  revealError?: string;
-  publishTxHash?: string;
-  revealedSplit?: string;
-  dealExists?: boolean;
 }
 
-export async function startTwoAgentBattle(args: {
+/**
+ * Starts a two-agent battle and returns an async iterator of progress events.
+ *
+ * Uses NDJSON streaming: each newline-separated JSON line is one BattleEvent.
+ * The server keeps the Lambda alive until the stream closes, so all phases
+ * happen inside a single request — no session store, no polling.
+ */
+export async function* streamTwoAgentBattle(args: {
   negotiationType: number;
   contextA: string;
   contextB: string;
   weightA?: number;
   currency?: string;
-}): Promise<{ sessionId: string }> {
+}): AsyncGenerator<BattleEvent, void, void> {
   const res = await fetch("/api/demo/two-agents/start", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -78,33 +79,59 @@ export async function startTwoAgentBattle(args: {
     const err = await res.json().catch(() => ({}));
     throw new Error(err.error || `start failed (HTTP ${res.status})`);
   }
-
-  return (await res.json()) as { sessionId: string };
-}
-
-export async function getBattleStatus(sessionId: string): Promise<BattleSession> {
-  const res = await fetch(`/api/demo/two-agents/status/${sessionId}`, {
-    cache: "no-store",
-  });
-
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error(err.error || `status failed (HTTP ${res.status})`);
+  if (!res.body) {
+    throw new Error("Response has no body — streaming unsupported in this browser");
   }
 
-  return (await res.json()) as BattleSession;
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+
+  try {
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+
+      // Split on newlines; keep the last (potentially partial) line in the buffer
+      const lines = buffer.split("\n");
+      buffer = lines.pop() ?? "";
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed) continue;
+        try {
+          yield JSON.parse(trimmed) as BattleEvent;
+        } catch {
+          // skip malformed lines defensively
+        }
+      }
+    }
+    // flush final buffered chunk
+    const tail = buffer.trim();
+    if (tail) {
+      try {
+        yield JSON.parse(tail) as BattleEvent;
+      } catch {
+        // ignore
+      }
+    }
+  } finally {
+    reader.releaseLock();
+  }
 }
 
 export interface RevealResponse {
   txHash: string;
-  dealExists: boolean | null;
-  revealedSplit: string | null;
-  cached?: boolean;
+  dealExists: boolean;
+  revealedSplit: string;
+  alreadyPublished?: boolean;
 }
 
-export async function revealBattleOnChain(sessionId: string): Promise<RevealResponse> {
-  const res = await fetch(`/api/demo/two-agents/reveal/${sessionId}`, {
+export async function revealBattleOnChain(roomAddress: string): Promise<RevealResponse> {
+  const res = await fetch(`/api/demo/two-agents/reveal`, {
     method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ roomAddress }),
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));

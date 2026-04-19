@@ -2,13 +2,24 @@
 
 import { useEffect, useRef, useState } from "react";
 import {
-  startTwoAgentBattle,
-  getBattleStatus,
+  streamTwoAgentBattle,
   revealBattleOnChain,
-  type BattleSession,
+  type BattleEvent,
   type BattleState,
 } from "@/lib/agentApi";
 import { NEGOTIATION_TYPE } from "@/config/contracts";
+
+/**
+ * Client-side view of the battle. Accumulates every BattleEvent from the
+ * stream so the UI always has the most up-to-date roomAddress / tx hashes /
+ * derived prices / reveal outcome.
+ */
+interface BattleView extends BattleEvent {
+  // Populated AFTER a successful /reveal call — server doesn't emit these.
+  publishTxHash?: string;
+  revealedSplit?: string;
+  dealExists?: boolean;
+}
 
 const SAMPLE_CONTEXTS = {
   [NEGOTIATION_TYPE.SALARY]: {
@@ -80,41 +91,15 @@ export function TwoAgentBattle() {
   const [negotiationType, setNegotiationType] = useState<number>(NEGOTIATION_TYPE.SALARY);
   const [contextA, setContextA] = useState(SAMPLE_CONTEXTS[NEGOTIATION_TYPE.SALARY].a);
   const [contextB, setContextB] = useState(SAMPLE_CONTEXTS[NEGOTIATION_TYPE.SALARY].b);
-  const [sessionId, setSessionId] = useState<string | null>(null);
-  const [session, setSession] = useState<BattleSession | null>(null);
+  const [view, setView] = useState<BattleView | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [starting, setStarting] = useState(false);
+  const [running, setRunning] = useState(false);
   // Timestamp (ms-since-start) for each state we've observed.
   const [timestamps, setTimestamps] = useState<Record<string, number>>({});
   const startTimeRef = useRef<number | null>(null);
 
   const preset = SAMPLE_CONTEXTS[negotiationType as keyof typeof SAMPLE_CONTEXTS];
-
-  // Poll status
-  useEffect(() => {
-    if (!sessionId) return;
-    let cancelled = false;
-    const tick = async () => {
-      try {
-        const s = await getBattleStatus(sessionId);
-        if (cancelled) return;
-        setSession(s);
-        setTimestamps((prev) => {
-          if (prev[s.state]) return prev;
-          const t0 = startTimeRef.current ?? performance.now();
-          return { ...prev, [s.state]: performance.now() - t0 };
-        });
-      } catch (err) {
-        if (!cancelled) setError((err as Error).message);
-      }
-    };
-    void tick();
-    const interval = setInterval(tick, 1200);
-    return () => {
-      cancelled = true;
-      clearInterval(interval);
-    };
-  }, [sessionId]);
 
   const handleTypeChange = (t: number) => {
     setNegotiationType(t);
@@ -127,33 +112,47 @@ export function TwoAgentBattle() {
 
   const handleStart = async () => {
     setStarting(true);
+    setRunning(true);
     setError(null);
-    setSession(null);
-    setTimestamps({});
+    setView({ state: "initializing" });
+    setTimestamps({ initializing: 0 });
     startTimeRef.current = performance.now();
+
     try {
-      const res = await startTwoAgentBattle({
+      for await (const event of streamTwoAgentBattle({
         negotiationType,
         contextA,
         contextB,
-      });
-      setSessionId(res.sessionId);
+      })) {
+        setView((prev) => ({ ...(prev ?? {}), ...event }));
+        setTimestamps((prev) => {
+          if (prev[event.state] !== undefined) return prev;
+          const t0 = startTimeRef.current ?? performance.now();
+          return { ...prev, [event.state]: performance.now() - t0 };
+        });
+        if (event.state === "error" && event.error) {
+          setError(event.error);
+        }
+      }
     } catch (err) {
-      setError((err as Error).message);
+      const msg = err instanceof Error ? err.message : String(err);
+      setError(msg);
+      setView((prev) => ({ ...(prev ?? { state: "error" }), state: "error", error: msg }));
     } finally {
       setStarting(false);
+      setRunning(false);
     }
   };
 
   const handleReset = () => {
-    setSession(null);
-    setSessionId(null);
+    setView(null);
     setTimestamps({});
     startTimeRef.current = null;
+    setError(null);
   };
 
-  const activeStep = session ? stepIndex(session.state) : -1;
-  const isTerminal = session?.state === "resolved" || session?.state === "error";
+  const activeStep = view ? stepIndex(view.state) : -1;
+  const isTerminal = !running && (view?.state === "resolved" || view?.state === "error");
 
   return (
     <div
@@ -203,7 +202,7 @@ export function TwoAgentBattle() {
         </div>
       </div>
 
-      {!session ? (
+      {!view ? (
         <>
           {/* Scenario selector */}
           <div className="mb-6">
@@ -273,7 +272,8 @@ export function TwoAgentBattle() {
         </>
       ) : (
         <BattleTimeline
-          session={session}
+          view={view}
+          setView={setView}
           activeStep={activeStep}
           timestamps={timestamps}
           preset={preset}
@@ -282,7 +282,7 @@ export function TwoAgentBattle() {
         />
       )}
 
-      {error && !session && (
+      {error && !view && (
         <div
           className="mt-4 p-3 text-xs"
           style={{
@@ -348,23 +348,28 @@ function AgentConsole({
 }
 
 function BattleTimeline({
-  session,
+  view,
+  setView,
   activeStep,
   timestamps,
   preset,
   isTerminal,
   onReset,
 }: {
-  session: BattleSession;
+  view: BattleView;
+  setView: React.Dispatch<React.SetStateAction<BattleView | null>>;
   activeStep: number;
   timestamps: Record<string, number>;
   preset: (typeof SAMPLE_CONTEXTS)[keyof typeof SAMPLE_CONTEXTS] | undefined;
   isTerminal: boolean;
   onReset: () => void;
 }) {
+  const sessionTag = view.roomAddress
+    ? `${view.roomAddress.slice(0, 6)}…${view.roomAddress.slice(-4)}`
+    : "starting…";
   return (
     <div>
-      <div className="label-tag mb-4">Session · {session.id.slice(-8)}</div>
+      <div className="label-tag mb-4">Room · {sessionTag}</div>
 
       {/* Timeline */}
       <div className="relative pl-6 md:pl-8">
@@ -429,7 +434,7 @@ function BattleTimeline({
                   </div>
                 )}
                 {/* Contextual payloads per step */}
-                <StepPayload step={step.state} session={session} preset={preset} />
+                <StepPayload step={step.state} view={view} preset={preset} />
               </div>
             </div>
           );
@@ -437,11 +442,11 @@ function BattleTimeline({
       </div>
 
       {/* Resolved callout */}
-      {session.state === "resolved" && (
-        <ResolvedCallout session={session} preset={preset} />
+      {view.state === "resolved" && (
+        <ResolvedCallout view={view} setView={setView} preset={preset} />
       )}
 
-      {session.state === "error" && (
+      {view.state === "error" && (
         <div
           className="mt-4 p-3 text-xs font-mono"
           style={{
@@ -450,7 +455,7 @@ function BattleTimeline({
             color: "var(--danger)",
           }}
         >
-          {session.error || "Unknown error"}
+          {view.error || "Unknown error"}
         </div>
       )}
 
@@ -474,40 +479,40 @@ function BlinkingDot() {
 
 function StepPayload({
   step,
-  session,
+  view,
   preset,
 }: {
   step: BattleState;
-  session: BattleSession;
+  view: BattleView;
   preset: (typeof SAMPLE_CONTEXTS)[keyof typeof SAMPLE_CONTEXTS] | undefined;
 }) {
   // Only render a payload once we have the data for the step.
-  if (step === "deriving_a" && session.derivedA) {
+  if (step === "deriving_a" && view.derivedA) {
     return (
       <DerivedPriceRow
         role={preset?.roles.a ?? "Party A"}
-        value={session.derivedA}
+        value={view.derivedA}
         unit={preset?.unit ?? "USD"}
       />
     );
   }
-  if (step === "deriving_b" && session.derivedB) {
+  if (step === "deriving_b" && view.derivedB) {
     return (
       <DerivedPriceRow
         role={preset?.roles.b ?? "Party B"}
-        value={session.derivedB}
+        value={view.derivedB}
         unit={preset?.unit ?? "USD"}
       />
     );
   }
-  if (step === "creating_room" && session.roomAddress) {
-    return <HashRow label="room" hash={session.roomAddress} />;
+  if (step === "creating_room" && view.roomAddress) {
+    return <HashRow label="room" hash={view.roomAddress} />;
   }
-  if (step === "submitted_a" && session.txHashA) {
-    return <HashRow label="tx" hash={session.txHashA} />;
+  if (step === "submitted_a" && view.txHashA) {
+    return <HashRow label="tx" hash={view.txHashA} />;
   }
-  if (step === "resolved" && session.txHashB) {
-    return <HashRow label="tx" hash={session.txHashB} />;
+  if (step === "resolved" && view.txHashB) {
+    return <HashRow label="tx" hash={view.txHashB} />;
   }
   return null;
 }
@@ -583,17 +588,19 @@ function HashRow({ label, hash }: { label: string; hash: string }) {
 }
 
 function ResolvedCallout({
-  session,
+  view,
+  setView,
   preset,
 }: {
-  session: BattleSession;
+  view: BattleView;
+  setView: React.Dispatch<React.SetStateAction<BattleView | null>>;
   preset: (typeof SAMPLE_CONTEXTS)[keyof typeof SAMPLE_CONTEXTS] | undefined;
 }) {
   const [revealing, setRevealing] = useState(false);
   const [revealError, setRevealError] = useState<string | null>(null);
 
-  const derivedA = session.derivedA ? Number(session.derivedA) : null;
-  const derivedB = session.derivedB ? Number(session.derivedB) : null;
+  const derivedA = view.derivedA ? Number(view.derivedA) : null;
+  const derivedB = view.derivedB ? Number(view.derivedB) : null;
   const zopaExistsProjected =
     derivedA !== null && derivedB !== null && derivedA <= derivedB;
   const projectedMidpoint =
@@ -601,23 +608,27 @@ function ResolvedCallout({
       ? Math.floor((derivedA + derivedB) / 2)
       : null;
 
-  const settled = !!session.publishTxHash;
-  const onChainSplit = session.revealedSplit
-    ? Number(session.revealedSplit)
-    : null;
-  const dealExists = settled
-    ? !!session.dealExists
-    : zopaExistsProjected;
-  const displayedValue = settled
-    ? onChainSplit
-    : projectedMidpoint;
+  const settled = !!view.publishTxHash;
+  const onChainSplit = view.revealedSplit ? Number(view.revealedSplit) : null;
+  const dealExists = settled ? !!view.dealExists : zopaExistsProjected;
+  const displayedValue = settled ? onChainSplit : projectedMidpoint;
 
   const handleReveal = async () => {
+    if (!view.roomAddress) return;
     setRevealing(true);
     setRevealError(null);
     try {
-      await revealBattleOnChain(session.id);
-      // The parent's polling effect will pick up publishTxHash + revealedSplit
+      const res = await revealBattleOnChain(view.roomAddress);
+      setView((prev) =>
+        prev
+          ? {
+              ...prev,
+              publishTxHash: res.txHash,
+              dealExists: res.dealExists,
+              revealedSplit: res.revealedSplit,
+            }
+          : prev
+      );
     } catch (err) {
       setRevealError((err as Error).message);
     } finally {
@@ -692,12 +703,12 @@ function ResolvedCallout({
       >
         <Stat
           label={`${preset?.roles.a ?? "Party A"} floor`}
-          value={session.derivedA ? Number(session.derivedA).toLocaleString() : "—"}
+          value={view.derivedA ? Number(view.derivedA).toLocaleString() : "—"}
           unit={preset?.unit ?? ""}
         />
         <Stat
           label={`${preset?.roles.b ?? "Party B"} ceiling`}
-          value={session.derivedB ? Number(session.derivedB).toLocaleString() : "—"}
+          value={view.derivedB ? Number(view.derivedB).toLocaleString() : "—"}
           unit={preset?.unit ?? ""}
         />
         <Stat
@@ -711,9 +722,9 @@ function ResolvedCallout({
         />
       </div>
 
-      {settled && session.publishTxHash ? (
+      {settled && view.publishTxHash ? (
         <div className="mt-5">
-          <HashRow label="publishResults" hash={session.publishTxHash} />
+          <HashRow label="publishResults" hash={view.publishTxHash} />
           <div
             className="mt-3 text-[0.65rem] leading-relaxed"
             style={{ color: "var(--text-muted)" }}
