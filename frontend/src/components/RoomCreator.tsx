@@ -67,13 +67,19 @@ export function RoomCreator({ onRoomCreated }: RoomCreatorProps) {
   }
 
   return (
-    <div className="card-surface p-6 animate-fade-up">
-      <div className="flex items-center gap-2 mb-6">
+    <div className="card-surface card-bracket p-6 animate-fade-up">
+      <div className="flex items-center gap-2 mb-1">
         <div
           className="w-1.5 h-1.5"
           style={{ background: "var(--accent)" }}
         />
         <h2 className="label-tag">New Negotiation Room</h2>
+      </div>
+      <div
+        className="font-display text-xl mb-5"
+        style={{ color: "var(--text-primary)" }}
+      >
+        Create a <span className="italic" style={{ color: "var(--accent)" }}>sealed</span> deal
       </div>
 
       <div className="space-y-4">

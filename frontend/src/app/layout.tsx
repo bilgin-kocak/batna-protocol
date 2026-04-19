@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import localFont from "next/font/local";
+import { Fraunces } from "next/font/google";
 import { Providers } from "@/components/Providers";
 import { Header } from "@/components/Header";
 import "./globals.css";
@@ -14,11 +15,19 @@ const geistMono = localFont({
   variable: "--font-geist-mono",
   weight: "100 900",
 });
+// Fraunces — distinctive variable serif with soft, confident italics
+const fraunces = Fraunces({
+  subsets: ["latin"],
+  variable: "--font-display",
+  display: "swap",
+  weight: ["400", "500", "600", "700"],
+  style: ["normal", "italic"],
+});
 
 export const metadata: Metadata = {
-  title: "BATNA Protocol",
+  title: "BATNA Protocol — Encrypted Negotiation on Fhenix CoFHE",
   description:
-    "Zero-Knowledge Negotiation Engine — find deal zones without revealing your position",
+    "The first negotiation where revealing your minimum first is no longer a disadvantage. FHE finds the deal zone without either party exposing their reservation price.",
 };
 
 export default function RootLayout({
@@ -29,11 +38,12 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body
-        className={`${geistSans.variable} ${geistMono.variable} antialiased`}
+        className={`${geistSans.variable} ${geistMono.variable} ${fraunces.variable} antialiased`}
       >
+        <div className="bg-grid" />
         <Providers>
           <Header />
-          <main className="max-w-2xl mx-auto px-6 py-10">{children}</main>
+          <main className="max-w-5xl mx-auto px-6 py-10">{children}</main>
         </Providers>
       </body>
     </html>

@@ -132,17 +132,24 @@ export function SoloAgentMode({
   }
 
   return (
-    <div className="card-surface p-6 mt-4">
-      <div className="mb-4">
+    <div className="card-surface card-bracket p-6 mt-4">
+      <div className="mb-5">
         <span
           className="label-tag"
           style={{ color: "var(--accent)" }}
         >
-          Solo Agent — {typeLabel}
+          Solo Agent · {typeLabel}
         </span>
+        <div
+          className="font-display text-lg mt-1"
+          style={{ color: "var(--text-primary)" }}
+        >
+          Let <span className="italic" style={{ color: "var(--accent)" }}>Claude</span> derive your floor
+        </div>
         <p className="text-xs mt-1" style={{ color: "var(--text-muted)" }}>
-          Claude reads your context, derives a reservation price, and hands it
-          back. You then encrypt + submit it yourself (agent never touches your wallet).
+          Claude reads your context, returns a reservation price, and hands it
+          back. You review, then encrypt + sign yourself — the agent never
+          touches your wallet.
         </p>
       </div>
 
@@ -191,18 +198,25 @@ export function SoloAgentMode({
 
       {derivedPrice && (
         <div
-          className="mt-4 p-3 text-sm"
+          className="mt-4 p-4 animate-vault card-bracket"
           style={{
-            background: "var(--bg-secondary)",
-            border: "1px solid var(--border)",
+            background:
+              "linear-gradient(135deg, rgba(201,162,39,0.06) 0%, transparent 70%), var(--bg-secondary)",
+            border: "1px solid var(--accent-dim)",
           }}
         >
-          <div className="label-tag mb-1">Claude&apos;s reservation price</div>
-          <div className="text-2xl font-bold" style={{ color: "var(--accent)" }}>
+          <div className="label-tag mb-1" style={{ color: "var(--accent)" }}>
+            Claude&apos;s reservation price
+          </div>
+          <div
+            className="font-display text-4xl glow-text"
+            style={{ color: "var(--accent)", letterSpacing: "-0.02em" }}
+          >
             ${Number(derivedPrice).toLocaleString()}
           </div>
-          <p className="text-[0.65rem] mt-1" style={{ color: "var(--text-muted)" }}>
-            Review it before you seal. Once encrypted, nobody — not even you — can change it.
+          <p className="text-[0.65rem] mt-2" style={{ color: "var(--text-muted)" }}>
+            Review before you seal. Once encrypted and signed, this ciphertext is
+            final — nobody, not even you, can change it.
           </p>
         </div>
       )}

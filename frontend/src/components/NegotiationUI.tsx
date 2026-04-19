@@ -166,28 +166,47 @@ export function NegotiationUI({ roomAddress }: NegotiationUIProps) {
         <StatusBar aSubmitted={!!aSubmitted} bSubmitted={!!bSubmitted} resolved={!!resolved} />
 
         {dealExists ? (
-          <div className="card-surface p-8 mt-4 text-center">
+          <div className="card-surface card-bracket p-10 mt-4 text-center animate-vault">
             <div
-              className="inline-block px-3 py-1 rounded-sm text-[0.65rem] tracking-[0.15em] uppercase mb-4"
-              style={{ background: "rgba(46, 204, 113, 0.1)", color: "var(--success)", border: "1px solid rgba(46, 204, 113, 0.2)" }}
+              className="inline-block px-3 py-1 text-[0.65rem] tracking-[0.15em] uppercase mb-4"
+              style={{
+                background: "rgba(46, 204, 113, 0.1)",
+                color: "var(--success)",
+                border: "1px solid rgba(46, 204, 113, 0.2)",
+              }}
             >
-              Deal Found
+              Vault closed · deal found
             </div>
             <div
-              className="text-4xl font-bold tracking-tight glow-text mb-3"
-              style={{ color: "var(--accent)" }}
+              className="font-display text-5xl md:text-6xl glow-text mb-3"
+              style={{ color: "var(--accent)", letterSpacing: "-0.02em" }}
             >
-              ${revealedSplit ? Number(revealedSplit).toLocaleString() : "..."}
+              ${revealedSplit ? Number(revealedSplit).toLocaleString() : "…"}
             </div>
-            <p className="text-xs" style={{ color: "var(--text-muted)" }}>
-              Fair split computed on encrypted values. Neither party&apos;s reservation price was revealed.
+            <p
+              className="text-xs max-w-sm mx-auto"
+              style={{ color: "var(--text-muted)" }}
+            >
+              Fair split computed on ciphertexts. Neither party&apos;s reservation
+              price was revealed — not to the contract, not to the other party,
+              not to the network.
             </p>
           </div>
         ) : (
-          <div className="card-surface p-8 mt-4 text-center">
+          <div className="card-surface card-bracket p-10 mt-4 text-center animate-vault">
             <div
-              className="inline-block px-3 py-1 rounded-sm text-[0.65rem] tracking-[0.15em] uppercase mb-4"
-              style={{ background: "rgba(231, 76, 60, 0.1)", color: "var(--danger)", border: "1px solid rgba(231, 76, 60, 0.2)" }}
+              className="inline-block px-3 py-1 text-[0.65rem] tracking-[0.15em] uppercase mb-4"
+              style={{
+                background: "rgba(231, 76, 60, 0.1)",
+                color: "var(--danger)",
+                border: "1px solid rgba(231, 76, 60, 0.2)",
+              }}
+            >
+              No ZOPA
+            </div>
+            <div
+              className="font-display text-3xl mb-2"
+              style={{ color: "var(--danger)" }}
             >
               No Deal
             </div>
@@ -195,7 +214,7 @@ export function NegotiationUI({ roomAddress }: NegotiationUIProps) {
               Reservation ranges did not overlap.
             </p>
             <p className="text-xs" style={{ color: "var(--text-muted)" }}>
-              Neither party knows how far apart the positions were.
+              Neither party learns how far apart the positions were.
             </p>
           </div>
         )}
@@ -244,7 +263,7 @@ export function NegotiationUI({ roomAddress }: NegotiationUIProps) {
           agentAddress={address}
         />
       ) : isParty ? (
-        <div className="card-surface p-6">
+        <div className="card-surface card-bracket p-6">
           <label className="label-tag block mb-2">
             {isPartyA
               ? "Your minimum acceptable value"
@@ -311,16 +330,22 @@ function RoomHeader({
 }) {
   return (
     <div className="mb-4">
-      <div className="flex items-center gap-2 mb-1">
+      <div className="flex items-center gap-2 mb-2">
         <div className="w-1.5 h-1.5" style={{ background: "var(--accent)" }} />
         <h2 className="label-tag">Negotiation Room</h2>
       </div>
-      <p className="text-base font-medium mb-1" style={{ color: "var(--text-primary)" }}>
-        {context || "Loading..."}
+      <p
+        className="font-display text-xl md:text-2xl mb-2 leading-tight"
+        style={{ color: "var(--text-primary)" }}
+      >
+        {context || <span style={{ color: "var(--text-muted)" }}>Loading…</span>}
       </p>
-      <div className="flex items-center gap-4 text-[0.65rem]" style={{ color: "var(--text-muted)" }}>
+      <div
+        className="flex items-center gap-4 text-[0.65rem] font-mono"
+        style={{ color: "var(--text-muted)" }}
+      >
         <span>
-          {roomAddress.slice(0, 6)}...{roomAddress.slice(-4)}
+          {roomAddress.slice(0, 6)}…{roomAddress.slice(-4)}
         </span>
         <span style={{ color: "var(--accent-dim)" }}>{myRole}</span>
       </div>
