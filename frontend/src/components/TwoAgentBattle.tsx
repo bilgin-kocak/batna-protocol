@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import {
   startTwoAgentBattle,
   getBattleStatus,
+  revealBattleOnChain,
   type BattleSession,
   type BattleState,
 } from "@/lib/agentApi";
@@ -588,13 +589,41 @@ function ResolvedCallout({
   session: BattleSession;
   preset: (typeof SAMPLE_CONTEXTS)[keyof typeof SAMPLE_CONTEXTS] | undefined;
 }) {
+  const [revealing, setRevealing] = useState(false);
+  const [revealError, setRevealError] = useState<string | null>(null);
+
   const derivedA = session.derivedA ? Number(session.derivedA) : null;
   const derivedB = session.derivedB ? Number(session.derivedB) : null;
-  const zopaExists = derivedA !== null && derivedB !== null && derivedA <= derivedB;
-  const midpoint =
-    zopaExists && derivedA !== null && derivedB !== null
+  const zopaExistsProjected =
+    derivedA !== null && derivedB !== null && derivedA <= derivedB;
+  const projectedMidpoint =
+    zopaExistsProjected && derivedA !== null && derivedB !== null
       ? Math.floor((derivedA + derivedB) / 2)
       : null;
+
+  const settled = !!session.publishTxHash;
+  const onChainSplit = session.revealedSplit
+    ? Number(session.revealedSplit)
+    : null;
+  const dealExists = settled
+    ? !!session.dealExists
+    : zopaExistsProjected;
+  const displayedValue = settled
+    ? onChainSplit
+    : projectedMidpoint;
+
+  const handleReveal = async () => {
+    setRevealing(true);
+    setRevealError(null);
+    try {
+      await revealBattleOnChain(session.id);
+      // The parent's polling effect will pick up publishTxHash + revealedSplit
+    } catch (err) {
+      setRevealError((err as Error).message);
+    } finally {
+      setRevealing(false);
+    }
+  };
 
   return (
     <div
@@ -602,30 +631,50 @@ function ResolvedCallout({
       style={{
         background:
           "linear-gradient(135deg, rgba(201,162,39,0.08) 0%, transparent 70%), var(--bg-secondary)",
-        border: "1px solid var(--accent-dim)",
+        border: `1px solid ${settled ? "var(--accent)" : "var(--accent-dim)"}`,
       }}
     >
-      <div className="flex items-center gap-2 mb-3">
-        <div className="w-1.5 h-1.5 rounded-full" style={{ background: "var(--success)" }} />
-        <span className="label-tag" style={{ color: "var(--success)" }}>
-          Vault closed · resolved on ciphertexts
+      <div className="flex items-center gap-2 mb-3 flex-wrap">
+        <div
+          className="w-1.5 h-1.5 rounded-full"
+          style={{
+            background: settled ? "var(--accent)" : "var(--success)",
+            boxShadow: settled ? "0 0 8px var(--accent-glow)" : "none",
+          }}
+        />
+        <span
+          className="label-tag"
+          style={{ color: settled ? "var(--accent)" : "var(--success)" }}
+        >
+          {settled
+            ? "Settled on-chain · threshold-decrypted"
+            : "Vault closed · resolved on ciphertexts"}
         </span>
       </div>
 
-      {zopaExists && midpoint !== null ? (
+      {dealExists && displayedValue !== null ? (
         <>
           <div
             className="font-display text-[2.2rem] md:text-[2.8rem] leading-tight glow-text"
             style={{ color: "var(--accent)" }}
           >
-            ${midpoint.toLocaleString()}
+            ${displayedValue.toLocaleString()}
           </div>
           <div
             className="text-[0.7rem] mt-1"
             style={{ color: "var(--text-muted)" }}
           >
-            projected settlement · weight 50/50 · still sealed as{" "}
-            <code style={{ color: "var(--accent-dim)" }}>euint64</code> on-chain
+            {settled ? (
+              <>
+                confirmed on-chain · emitted by{" "}
+                <code style={{ color: "var(--accent-dim)" }}>DealFound</code>
+              </>
+            ) : (
+              <>
+                projected settlement · weight 50/50 · still sealed as{" "}
+                <code style={{ color: "var(--accent-dim)" }}>euint64</code>
+              </>
+            )}
           </div>
         </>
       ) : (
@@ -654,7 +703,7 @@ function ResolvedCallout({
         <Stat
           label="ZOPA width"
           value={
-            zopaExists && derivedA !== null && derivedB !== null
+            zopaExistsProjected && derivedA !== null && derivedB !== null
               ? (derivedB - derivedA).toLocaleString()
               : "0"
           }
@@ -662,15 +711,59 @@ function ResolvedCallout({
         />
       </div>
 
-      <div
-        className="mt-5 text-[0.65rem] leading-relaxed"
-        style={{ color: "var(--text-muted)" }}
-      >
-        Plaintexts stayed off-chain. Only the encrypted midpoint + encrypted
-        zopa bool were written. Call{" "}
-        <code style={{ color: "var(--accent-dim)" }}>publishResults()</code>{" "}
-        with a threshold-decrypted signature to reveal the on-chain result.
-      </div>
+      {settled && session.publishTxHash ? (
+        <div className="mt-5">
+          <HashRow label="publishResults" hash={session.publishTxHash} />
+          <div
+            className="mt-3 text-[0.65rem] leading-relaxed"
+            style={{ color: "var(--text-muted)" }}
+          >
+            Threshold-decrypted by the CoFHE coprocessor, verified by{" "}
+            <code style={{ color: "var(--accent-dim)" }}>
+              FHE.publishDecryptResult()
+            </code>
+            . The individual reservation prices ($
+            {derivedA?.toLocaleString()} floor · ${derivedB?.toLocaleString()}{" "}
+            ceiling) never touched the chain.
+          </div>
+        </div>
+      ) : (
+        <>
+          <div
+            className="mt-5 text-[0.65rem] leading-relaxed"
+            style={{ color: "var(--text-muted)" }}
+          >
+            Plaintexts stayed off-chain. Only the encrypted midpoint + encrypted
+            ZOPA bool were written. Click below to call{" "}
+            <code style={{ color: "var(--accent-dim)" }}>publishResults()</code>{" "}
+            and reveal the settlement on-chain.
+          </div>
+          <button
+            className="btn-primary w-full mt-4"
+            onClick={handleReveal}
+            disabled={revealing || !zopaExistsProjected}
+            style={{ letterSpacing: "0.2em" }}
+          >
+            {revealing
+              ? "Threshold-decrypting..."
+              : zopaExistsProjected
+              ? "▸ Reveal on-chain"
+              : "No ZOPA — nothing to reveal"}
+          </button>
+          {revealError && (
+            <div
+              className="mt-3 p-3 text-xs font-mono"
+              style={{
+                background: "rgba(231, 76, 60, 0.08)",
+                border: "1px solid rgba(231, 76, 60, 0.2)",
+                color: "var(--danger)",
+              }}
+            >
+              {revealError}
+            </div>
+          )}
+        </>
+      )}
     </div>
   );
 }

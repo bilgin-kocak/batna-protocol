@@ -53,6 +53,12 @@ export interface BattleSession {
   rawResponseA?: string;
   rawResponseB?: string;
   error?: string;
+  // Populated by the reveal endpoint
+  revealing?: boolean;
+  revealError?: string;
+  publishTxHash?: string;
+  revealedSplit?: string;
+  dealExists?: boolean;
 }
 
 export async function startTwoAgentBattle(args: {
@@ -87,4 +93,22 @@ export async function getBattleStatus(sessionId: string): Promise<BattleSession>
   }
 
   return (await res.json()) as BattleSession;
+}
+
+export interface RevealResponse {
+  txHash: string;
+  dealExists: boolean | null;
+  revealedSplit: string | null;
+  cached?: boolean;
+}
+
+export async function revealBattleOnChain(sessionId: string): Promise<RevealResponse> {
+  const res = await fetch(`/api/demo/two-agents/reveal/${sessionId}`, {
+    method: "POST",
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || `reveal failed (HTTP ${res.status})`);
+  }
+  return (await res.json()) as RevealResponse;
 }

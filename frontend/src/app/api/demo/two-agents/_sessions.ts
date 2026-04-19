@@ -29,6 +29,15 @@ export interface BattleSession {
   rawResponseA?: string;
   rawResponseB?: string;
   error?: string;
+
+  // Populated once the session-holder hits "Reveal on-chain" and the server
+  // threshold-decrypts + calls publishResults(). Until then dealExists +
+  // revealedSplit are still sealed as euint64/ebool on-chain.
+  revealing?: boolean;
+  revealError?: string;
+  publishTxHash?: string;
+  revealedSplit?: string;
+  dealExists?: boolean;
 }
 
 // Single in-memory map shared by start + status routes (server-only).
