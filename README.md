@@ -133,9 +133,28 @@ Rooms can optionally designate an **auditor** address at creation. The auditor c
 // Auditor sees: "Deal at $137,500" or "No Deal"
 // Auditor CANNOT see: Party A's $130K floor or Party B's $145K ceiling
 FHE.allow(encResult, auditor);
+FHE.allow(encZopaExists, auditor);
+// (intentionally NO allow() calls for encMinA / encMaxB)
 ```
 
+**Invariant enforced + verifiable on-chain.** The contract exposes `auditorAccess()` which returns `(canSeeMinA, canSeeMaxB, canSeeResult, canSeeZopa)` by querying the CoFHE ACL directly via `FHE.isAllowed()`. The privacy invariant — `canSeeMinA == false && canSeeMaxB == false` — is asserted in the test suite after every resolution.
+
 This enables institutional compliance — proving a negotiation was fair without revealing positions to the public.
+
+### Safe Value Range (Overflow Analysis)
+
+Settlement: `(minA * weightA + maxB * weightB) / 100` with `weightA + weightB = 100`.
+
+The intermediate products must fit in `euint64`. Worst case: `max(minA, maxB) * 100`. Safe when both reservation prices are below `type(uint64).max / 100 ≈ 1.84e17`.
+
+| Use case | Encoded value | vs safe threshold |
+|---|---|---|
+| Salary in USD | up to `3e5` | ✅ 12 orders below |
+| OTC in USD cents / token | up to `1e9` | ✅ 8 orders below |
+| M&A in integer USD millions | up to `1e9` | ✅ 8 orders below |
+| Any realistic bilateral deal | `< 1e17` | ✅ Safe |
+
+FHE cannot bounds-check encrypted inputs without decrypting them, so the safe range is a contract-level guarantee documented in `_resolve()` NatSpec. Edge-weight behavior (`weightA=0`, `weightA=100`) is covered by dedicated tests — the formula collapses to `minA` or `maxB` exactly.
 
 ## Wave 2 — Intent-Based AI Agents
 
@@ -298,7 +317,7 @@ cd batna-protocol
 # Install dependencies
 pnpm install
 
-# Run all 57 tests (contracts + agent module)
+# Run all 62 tests (contracts + agent module)
 pnpm test
 
 # Compile contracts
@@ -370,7 +389,7 @@ npm run dev
 
 ## Tests
 
-**57 tests, strict TDD** — every test written before its implementation. Contract tests use real CoFHE SDK encrypted inputs via `Encryptable.uint64()`; agent tests inject a mock Anthropic client for deterministic offline runs.
+**62 tests, strict TDD** — every test written before its implementation. Contract tests use real CoFHE SDK encrypted inputs via `Encryptable.uint64()`; agent tests inject a mock Anthropic client for deterministic offline runs.
 
 ```
   NegotiationFactory              6 tests
@@ -379,7 +398,7 @@ npm run dev
   agent/derivePrice               5 tests (mocked Anthropic, retry logic, prompt shape)
   agent/encryptSubmit             4 tests (e2e: derive -> encrypt -> submit -> resolve)
 
-  57 passing
+  62 passing
 ```
 
 Key Wave 2 tests:

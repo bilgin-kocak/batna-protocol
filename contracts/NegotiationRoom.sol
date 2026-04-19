@@ -142,6 +142,16 @@ contract NegotiationRoom {
     ///      Settlement = (minA * weightA + maxB * (100 - weightA)) / 100
     ///      When weightA=50, this equals the simple midpoint (minA + maxB) / 2.
     ///      Neither reservation price is ever decrypted.
+    ///
+    ///      SAFE VALUE RANGE (overflow analysis of the euint64 math):
+    ///      The intermediate products minA*weightA + maxB*weightB must fit
+    ///      in euint64. Since weightA + weightB = 100, the worst case is
+    ///      max(minA, maxB) * 100. Safe when both reservation prices are
+    ///      strictly below  type(uint64).max / 100  ≈ 1.84e17.
+    ///      For reference: $1 quadrillion in cents = 1e17 (still safe).
+    ///      Any realistic salary / OTC / M&A deal size is comfortably inside.
+    ///      FHE cannot bounds-check encrypted inputs without decrypting them,
+    ///      so the safe range is a client-side contract with callers.
     function _resolve() internal {
         // ZOPA check: is A's floor <= B's ceiling?
         ebool zopaExists = FHE.lte(encMinA, encMaxB);
@@ -180,14 +190,47 @@ contract NegotiationRoom {
         FHE.allowPublic(encZopaExists);
         FHE.allowPublic(encResult);
 
-        // Confidential auditability: auditor can decrypt result, never inputs
+        // Confidential auditability — PRIVACY INVARIANT:
+        //   The auditor is allowed to decrypt ONLY the final settlement result
+        //   (`encResult`) and the ZOPA existence bit (`encZopaExists`).
+        //
+        //   The auditor is NEVER granted access to `encMinA` or `encMaxB` —
+        //   the individual reservation prices stay sealed even under audit.
+        //
+        //   This invariant is verified on-chain by `auditorAccess()` below
+        //   and asserted in `test/NegotiationRoom.test.ts` after resolution.
         if (auditor != address(0)) {
             FHE.allow(encZopaExists, auditor);
             FHE.allow(encResult, auditor);
-            // Note: encMinA and encMaxB are NEVER allowed for auditor
+            // (intentionally NO allow() calls for encMinA / encMaxB)
         }
 
         resolved = true;
+    }
+
+    /// @notice ACL inspection for the configured auditor. Returns whether each
+    ///         encrypted field is decryptable by the auditor address.
+    /// @dev    Privacy invariant: `canSeeMinA` and `canSeeMaxB` MUST always be
+    ///         false when an auditor is set. Only `canSeeResult` and
+    ///         `canSeeZopa` are granted. Testable form of the invariant —
+    ///         call via staticCall in unit tests to assert the boundary.
+    /// @return canSeeMinA   true iff auditor can decrypt partyA's floor (MUST be false)
+    /// @return canSeeMaxB   true iff auditor can decrypt partyB's ceiling (MUST be false)
+    /// @return canSeeResult true iff auditor can decrypt the settlement result
+    /// @return canSeeZopa   true iff auditor can decrypt the ZOPA existence bit
+    function auditorAccess()
+        external
+        returns (bool canSeeMinA, bool canSeeMaxB, bool canSeeResult, bool canSeeZopa)
+    {
+        if (auditor == address(0)) {
+            return (false, false, false, false);
+        }
+        return (
+            FHE.isAllowed(encMinA, auditor),
+            FHE.isAllowed(encMaxB, auditor),
+            FHE.isAllowed(encResult, auditor),
+            FHE.isAllowed(encZopaExists, auditor)
+        );
     }
 
     // ── View Functions for SDK Decryption ───────────────────────────

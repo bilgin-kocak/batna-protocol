@@ -382,4 +382,124 @@ describe("NegotiationRoom", function () {
     const encResult = await room.getEncryptedResult();
     await mock_expectPlaintext(alice.provider, encResult, 137500n);
   });
+
+  // ── Privacy Invariant: Auditor ACL ───────────────────────────
+
+  it("auditor NEVER gets ACL access to encMinA or encMaxB — only result + ZOPA", async function () {
+    const [owner, alice, bob, auditor] = await hre.ethers.getSigners();
+    const client = await hre.cofhe.createClientWithBatteries(owner);
+
+    const Room = await hre.ethers.getContractFactory("NegotiationRoom");
+    const room = await Room.deploy(
+      alice.address,
+      bob.address,
+      "Audited salary negotiation",
+      50,
+      auditor.address, // auditor configured
+      0,
+      1
+    );
+
+    await encryptAndSubmit(client, alice, room, 130000n);
+    await encryptAndSubmit(client, bob, room, 145000n);
+    expect(await room.resolved()).to.be.true;
+
+    // auditorAccess() mutates (calls into TaskManager) — read via staticCall
+    const access = await room.auditorAccess.staticCall();
+
+    expect(access.canSeeMinA, "auditor must NEVER see Party A's floor").to.be.false;
+    expect(access.canSeeMaxB, "auditor must NEVER see Party B's ceiling").to.be.false;
+    expect(access.canSeeResult, "auditor should be able to see the settlement").to.be.true;
+    expect(access.canSeeZopa, "auditor should be able to see ZOPA existence").to.be.true;
+  });
+
+  it("when no auditor is set, auditorAccess returns all false", async function () {
+    const { room, alice, bob, client } = await loadFixture(deployRoomFixture);
+
+    await encryptAndSubmit(client, alice, room, 130000n);
+    await encryptAndSubmit(client, bob, room, 145000n);
+
+    const access = await room.auditorAccess.staticCall();
+    expect(access.canSeeMinA).to.be.false;
+    expect(access.canSeeMaxB).to.be.false;
+    expect(access.canSeeResult).to.be.false;
+    expect(access.canSeeZopa).to.be.false;
+  });
+
+  // ── Edge-weight settlement (overflow surface) ────────────────
+
+  it("weightA=100 returns Party A's floor exactly (extreme seller-preferred)", async function () {
+    const [owner, alice, bob] = await hre.ethers.getSigners();
+    const client = await hre.cofhe.createClientWithBatteries(owner);
+
+    const Room = await hre.ethers.getContractFactory("NegotiationRoom");
+    const room = await Room.deploy(
+      alice.address,
+      bob.address,
+      "weightA=100",
+      100,
+      "0x0000000000000000000000000000000000000000",
+      0,
+      1
+    );
+
+    await encryptAndSubmit(client, alice, room, 130000n);
+    await encryptAndSubmit(client, bob, room, 145000n);
+
+    // Settlement = (130000*100 + 145000*0) / 100 = 130000
+    const encResult = await room.getEncryptedResult();
+    await mock_expectPlaintext(alice.provider, encResult, 130000n);
+  });
+
+  it("weightA=0 returns Party B's ceiling exactly (extreme buyer-preferred)", async function () {
+    const [owner, alice, bob] = await hre.ethers.getSigners();
+    const client = await hre.cofhe.createClientWithBatteries(owner);
+
+    const Room = await hre.ethers.getContractFactory("NegotiationRoom");
+    const room = await Room.deploy(
+      alice.address,
+      bob.address,
+      "weightA=0",
+      0,
+      "0x0000000000000000000000000000000000000000",
+      0,
+      1
+    );
+
+    await encryptAndSubmit(client, alice, room, 130000n);
+    await encryptAndSubmit(client, bob, room, 145000n);
+
+    // Settlement = (130000*0 + 145000*100) / 100 = 145000
+    const encResult = await room.getEncryptedResult();
+    await mock_expectPlaintext(alice.provider, encResult, 145000n);
+  });
+
+  it("settles correctly at values well inside the safe range (no overflow)", async function () {
+    const [owner, alice, bob] = await hre.ethers.getSigners();
+    const client = await hre.cofhe.createClientWithBatteries(owner);
+
+    const Room = await hre.ethers.getContractFactory("NegotiationRoom");
+    const room = await Room.deploy(
+      alice.address,
+      bob.address,
+      "Large deal within safe range",
+      50,
+      "0x0000000000000000000000000000000000000000",
+      0,
+      3 // MA
+    );
+
+    // Trillion-dollar acquisition in integer USD millions — max product
+    // per side is 1_000_000_000 * 100 = 1e11, orders of magnitude below
+    // 2^64 / 100 ≈ 1.84e17. No overflow.
+    const minA = 1_000_000_000n; // $1T seller floor
+    const maxB = 1_100_000_000n; // $1.1T acquirer ceiling
+    await encryptAndSubmit(client, alice, room, minA);
+    await encryptAndSubmit(client, bob, room, maxB);
+
+    // Settlement = (1e9*50 + 1.1e9*50) / 100 = 1.05e9
+    const expected = (minA + maxB) / 2n;
+    const encResult = await room.getEncryptedResult();
+    await mock_expectPlaintext(alice.provider, encResult, expected);
+  });
 });
