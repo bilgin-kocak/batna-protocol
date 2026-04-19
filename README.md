@@ -343,7 +343,7 @@ DEMO_AGENT_B_PRIVATE_KEY=0x...    # pre-funded on Arbitrum Sepolia
 
 ```bash
 npx hardhat agent-negotiate \
-  --factory 0xE387f4FDa884FCc976F3f27853E34FdB895E9fBE \
+  --factory 0x5325cF28337b2f2cf7C8EcE121fdF73d18885915 \
   --counterparty 0x... \
   --role partyA \
   --type salary \
@@ -353,11 +353,14 @@ npx hardhat agent-negotiate \
 
 ### Deployed Contracts (Arbitrum Sepolia)
 
-| Contract                         | Address                                                                                                                        |
-| -------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
-| **NegotiationFactory (Wave 2)**  | [`0xE387f4FDa884FCc976F3f27853E34FdB895E9fBE`](https://sepolia.arbiscan.io/address/0xE387f4FDa884FCc976F3f27853E34FdB895E9fBE) |
-| NegotiationFactory (Wave 1)      | [`0x1221aBCe7D8FB1ba4cF9293E94539cb45e7857fE`](https://sepolia.arbiscan.io/address/0x1221aBCe7D8FB1ba4cF9293E94539cb45e7857fE) |
-| Deployer                         | `0x48D185bc646534597E25199dd4d73692ebD98BAc`                                                                                   |
+| Contract                               | Address                                                                                                                        |
+| -------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| **NegotiationFactory (Wave 2.1)** ⭐ current | [`0x5325cF28337b2f2cf7C8EcE121fdF73d18885915`](https://sepolia.arbiscan.io/address/0x5325cF28337b2f2cf7C8EcE121fdF73d18885915) |
+| NegotiationFactory (Wave 2)            | [`0xE387f4FDa884FCc976F3f27853E34FdB895E9fBE`](https://sepolia.arbiscan.io/address/0xE387f4FDa884FCc976F3f27853E34FdB895E9fBE) |
+| NegotiationFactory (Wave 1)            | [`0x1221aBCe7D8FB1ba4cF9293E94539cb45e7857fE`](https://sepolia.arbiscan.io/address/0x1221aBCe7D8FB1ba4cF9293E94539cb45e7857fE) |
+| Deployer                               | `0x48D185bc646534597E25199dd4d73692ebD98BAc`                                                                                   |
+
+Wave 2.1 adds `bytes32 contextHash` (no plaintext context on-chain), the `RoomStatus` lifecycle with `expireRoom()` / `cancelRoom()`, and the expanded `AgentSubmission` event with `templateId` + `contextHash` + `modelHash` + `promptVersionHash`. See [`docs/PRIVACY_MODEL.md`](./docs/PRIVACY_MODEL.md) and [`docs/THREAT_MODEL.md`](./docs/THREAT_MODEL.md).
 
 ### Deploy to Arbitrum Sepolia
 
@@ -371,7 +374,7 @@ npx hardhat deploy-factory --network arb-sepolia
 
 # Create a negotiation room
 npx hardhat create-room \
-  --factory 0xE387f4FDa884FCc976F3f27853E34FdB895E9fBE \
+  --factory 0x5325cF28337b2f2cf7C8EcE121fdF73d18885915 \
   --partyb <COUNTERPARTY_ADDRESS> \
   --context "Salary negotiation: Senior Engineer" \
   --weight 50 \
