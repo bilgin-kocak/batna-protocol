@@ -756,11 +756,22 @@ function ResolvedCallout({
             style={{ letterSpacing: "0.2em" }}
           >
             {revealing
-              ? "Threshold-decrypting..."
+              ? "Waiting for threshold network (up to ~40s)..."
               : zopaExistsProjected
               ? "▸ Reveal on-chain"
               : "No ZOPA — nothing to reveal"}
           </button>
+          {revealing && (
+            <div
+              className="mt-2 text-[0.65rem] leading-relaxed"
+              style={{ color: "var(--text-muted)" }}
+            >
+              The CoFHE threshold network signs the decryption after
+              allowPublic(). This takes 10–30s per ciphertext. Retrying
+              decryptForTx + publishResults with backoff until the signed
+              plaintext lands.
+            </div>
+          )}
           {revealError && (
             <div
               className="mt-3 p-3 text-xs font-mono"
