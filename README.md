@@ -106,7 +106,7 @@ flowchart LR
 | Party reservation prices        | **Hidden**   | Encrypted client-side via CoFHE SDK; never decrypted individually on-chain  |
 | ZOPA existence (before publish) | **Hidden**   | Encrypted `ebool`; revealed only via threshold decryption after both submit |
 | Final settlement result         | **Revealed** | Only after both parties submit + threshold network decrypts                 |
-| Room metadata / context         | **Public**   | Stored as plaintext string on-chain                                         |
+| Room context (deal description) | **Hashed**   | Stored on-chain as `bytes32 contextHash = keccak256(context)` — plaintext stays off-chain (Wave 2.1) |
 | Participant addresses           | **Public**   | On-chain, visible in contract state                                         |
 | Submission timing               | **Public**   | Transaction timestamps visible on-chain                                     |
 | Number of rooms / negotiations  | **Public**   | Factory tracks all rooms publicly                                           |
@@ -160,7 +160,7 @@ FHE cannot bounds-check encrypted inputs without decrypting them, so the safe ra
 
 **Humans submit intent. The protocol computes the deal.**
 
-Wave 2 ships an agentic layer that reads free-form context (job description, deal memo, trading desk brief), derives a reservation price via Claude `claude-opus-4-6`, encrypts it client-side via the CoFHE SDK, and submits it to `NegotiationRoom.submitReservationAsAgent(...)` — which emits an on-chain `AgentSubmission` event so the agent's provenance is verifiable forever.
+Wave 2 ships an **optional** agentic layer on top of the FHE primitive. An agent reads free-form context (job description, deal memo, trading desk brief), derives a reservation price via Claude `claude-opus-4-6`, encrypts it client-side via the CoFHE SDK, and submits it to `NegotiationRoom.submitReservationAsAgent(...)`. The room emits an on-chain `AgentSubmission(party, agent, templateId, contextHash, modelHash, promptVersionHash)` event so the derivation is verifiable forever — AI becomes auditable input, not a trusted party. The protocol's privacy guarantees come from FHE, not from the agent.
 
 ### Two modes
 
@@ -206,25 +206,30 @@ Wave 2 extends `NegotiationRoom.sol` with:
 
 - `enum NegotiationType { GENERIC, SALARY, OTC, MA }` + `negotiationType` storage (on-chain routing signal)
 - `uint256 public deadline` + `notExpired` modifier (submissions revert past the deadline)
-- `submitReservationAsAgent(InEuint64, address agent)` — same logic as `submitReservation`, plus emits `AgentSubmission(party, agent)`
-- Factory `createRoom` passes deadline + type through to the room
+- `submitReservationAsAgent(InEuint64, address agent, AgentProvenance)` — same logic as `submitReservation`, plus emits extended `AgentSubmission(party, agent, templateId, contextHash, modelHash, promptVersionHash)`
+- Factory `createRoom` passes deadline + type + `bytes32 contextHash` through to the room
+
+**Wave 2.1 hardening** (response to reviewer feedback):
+
+- `bytes32 contextHash` replaces plaintext `string context` — no deal names on-chain
+- `enum RoomStatus { OPEN, RESOLVED, EXPIRED, CANCELLED }` with `expireRoom()` and `cancelRoom()` — stalled-room recovery
+- `auditorAccess()` view queries `FHE.isAllowed()` live so the ACL invariant (`canSeeMinA == canSeeMaxB == false`) is on-chain verifiable
+- NatSpec documents the safe settlement range — `max(minA, maxB) < 2^64 / 100 ≈ 1.84e17` — with dedicated edge-weight overflow tests
 
 All Wave 1 tests stay green (deadline defaults to `0` = never expires, type defaults to `SALARY`).
 
 ### Why this matters
 
-Every negotiation — salary, M&A, real estate, even geopolitical ceasefires — reduces to the same math: _do two hidden ranges overlap?_ With AI agents deriving the numbers, **any negotiation described in words becomes encrypted arithmetic:**
+Every bilateral deal — salary, procurement, OTC, M&A — reduces to the same math: _do two hidden ranges overlap?_ With agents deriving numbers from free-form context, **any negotiation described in words becomes encrypted arithmetic:**
 
 | Scenario         | What the AI Agent Does                                                      |
 | ---------------- | --------------------------------------------------------------------------- |
 | **Salary**       | Reads job description + market data → encrypted floor/ceiling               |
 | **M&A**          | Analyzes financials → encrypted max offer / min accept                      |
 | **OTC**          | Computes fair spread → encrypted bid/ask on euint64 cents                   |
-| **Geopolitical** | Analyzes strategic position, sanctions, domestic pressure → encrypted terms |
+| **Procurement**  | Reads RFP + supplier constraints → encrypted unit-price band                |
 
-> Consider US-Iran tensions: neither side can state acceptable concessions without appearing weak. AI agents derive encrypted terms from each side's strategic position. If ranges overlap, a framework emerges. If not, neither side learns the gap.
->
-> **No diplomat reveals a position. The math finds the deal.**
+The agent is an optional input. If both sides agree on terms, the protocol settles on ciphertexts. If not, both sides exit without revealing positions.
 
 ## Architecture
 
@@ -239,9 +244,9 @@ batna/
 │   ├── encryptSubmit.ts          ← CoFHE encrypt + ethers submit
 │   └── types.ts                  ← NegotiationType, AgentRole, Template
 ├── test/
-│   ├── NegotiationRoom.test.ts   ← 21 tests (access, ZOPA, weighted, deadline, agent events)
-│   ├── NegotiationFactory.test.ts← 6 tests (creation, tracking, deadline+type passthrough)
-│   └── agent/                    ← 30 agent tests (templates, derivePrice, encryptSubmit)
+│   ├── NegotiationRoom.test.ts   ← 34 tests (access, ZOPA, weighted, deadline, agent provenance, RoomStatus lifecycle, auditor-ACL invariant, edge-weight overflow, contextHash)
+│   ├── NegotiationFactory.test.ts← 6 tests (creation, tracking, deadline + type + contextHash passthrough)
+│   └── agent/                    ← 31 agent tests (templates, derivePrice retry, encryptSubmit e2e)
 ├── tasks/
 │   ├── deploy.ts                 ← deploy-factory + create-room (--deadline, --type)
 │   └── agent.ts                  ← Wave 2: agent-negotiate CLI task
@@ -317,7 +322,7 @@ cd batna-protocol
 # Install dependencies
 pnpm install
 
-# Run all 62 tests (contracts + agent module)
+# Run all 71 tests (contracts + agent module)
 pnpm test
 
 # Compile contracts
@@ -392,24 +397,29 @@ npm run dev
 
 ## Tests
 
-**62 tests, strict TDD** — every test written before its implementation. Contract tests use real CoFHE SDK encrypted inputs via `Encryptable.uint64()`; agent tests inject a mock Anthropic client for deterministic offline runs.
+**71 tests, strict TDD** — every test written before its implementation. Contract tests use real CoFHE SDK encrypted inputs via `Encryptable.uint64()`; agent tests inject a mock Anthropic client for deterministic offline runs.
 
 ```
   NegotiationFactory              6 tests
-  NegotiationRoom                21 tests (includes Wave 2 deadline + enum + agent events)
-  agent/templates                18 tests (salary + otc + ma + registry + parseFirstInteger)
+  NegotiationRoom                34 tests (ZOPA, weighted, deadline, agent provenance,
+                                            RoomStatus lifecycle, auditor-ACL invariant,
+                                            edge-weight overflow, bytes32 contextHash)
+  agent/templates                21 tests (salary + otc + ma + registry + parseFirstInteger)
   agent/derivePrice               5 tests (mocked Anthropic, retry logic, prompt shape)
-  agent/encryptSubmit             4 tests (e2e: derive -> encrypt -> submit -> resolve)
+  agent/encryptSubmit             5 tests (e2e: derive -> encrypt -> submit -> resolve,
+                                            AgentProvenance passthrough)
 
-  62 passing
+  71 passing
 ```
 
-Key Wave 2 tests:
+Key Wave 2 / Wave 2.1 tests:
 
-- `constructor stores the deadline value` — deadline param is persisted
 - `submitReservation reverts after the deadline` — `notExpired` modifier works with `evm_setNextBlockTimestamp`
-- `submitReservationAsAgent emits PartySubmitted and AgentSubmission` — agent provenance is on-chain
-- `submitReservationAsAgent counts as the party for ZOPA resolution` — agent submissions flow through the same `_resolve()` path
+- `submitReservationAsAgent emits extended AgentSubmission with full provenance` — `templateId + contextHash + modelHash + promptVersionHash` are on-chain
+- `auditorAccess asserts canSeeMinA == canSeeMaxB == false after resolution` — ACL invariant is verifiable live via `FHE.isAllowed()`
+- `edge-weight settlement with weightA = 0 collapses to maxB`, `weightA = 100 collapses to minA`, `and stays safe at 1e12 (≈$1T) inputs` — overflow range enforced
+- `expireRoom moves status OPEN → EXPIRED after the deadline`, `cancelRoom OPEN → CANCELLED by either party before resolution` — stalled-room recovery
+- `contextHash is stored and returned as bytes32` — plaintext context never hits chain
 - `derivePrice retries once when first response is unparsable, then succeeds` — resilient to Claude occasional prose
 - `agent/encryptSubmit end-to-end` — both parties submit via the agent helper and the room resolves to the correct midpoint
 
@@ -420,7 +430,7 @@ Key Wave 2 tests:
 | FHE Contracts  | Fhenix CoFHE — `@fhenixprotocol/cofhe-contracts` (InEuint64, FHE.sol) |
 | FHE Client SDK | `@cofhe/sdk` + `@cofhe/react` — client-side encryption + React hooks  |
 | Contracts      | Solidity 0.8.25                                                       |
-| Testing        | Hardhat + `@cofhe/hardhat-plugin` + Mocha/Chai (62 tests)             |
+| Testing        | Hardhat + `@cofhe/hardhat-plugin` + Mocha/Chai (71 tests)             |
 | Frontend       | Next.js 14 + Tailwind CSS                                             |
 | Web3           | wagmi v2 + viem + RainbowKit                                          |
 | Chain          | Arbitrum Sepolia                                                      |
